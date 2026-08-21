@@ -169,10 +169,13 @@ pub struct Walk {
 /// Matches `find DIR -type f` plus `find DIR -type d`: hidden entries
 /// included, no ignore files honored, symlinks not followed (so a symlink -
 /// to a file or a directory - is never touched, and never walked into).
-/// The directory itself is the first entry of `dirs`, so the flagged
-/// directory's own timestamp is renewed too: touching a file does not move
-/// its parent's mtime, so a directory's stamp otherwise only ever moves
-/// when an entry is added or removed. A path that isn't a directory
+/// `dirs` holds the directory itself along with every subdirectory, so the
+/// flagged directory's own timestamp is renewed too: touching a file does
+/// not move its parent's mtime, so a directory's stamp otherwise only ever
+/// moves when an entry is added or removed. Nothing here depends on the
+/// order the walker yields entries in (it yields the root first, which
+/// `enumerate_dir_lists_all_including_hidden_and_ignored` pins) - every
+/// entry is touched exactly once either way. A path that isn't a directory
 /// (e.g. flagged then removed) is reported as a benign skip, not an error.
 pub fn enumerate_dir(directory: &str) -> Walk {
     if !Path::new(directory).is_dir() {
@@ -570,6 +573,32 @@ pub struct Renewal {
     pub failures: usize,
 }
 
+impl Renewal {
+    fn add(&mut self, other: &Renewal) {
+        self.files += other.files;
+        self.dirs += other.dirs;
+        self.failures += other.failures;
+    }
+}
+
+/// The serial mode's per-directory progress line.
+///
+/// It reports what the directory actually *renewed*, not what the walk
+/// found, and drops the `ok` tag as soon as anything failed - a line that
+/// reads `ok 1386 files` over a directory where every touch was refused is
+/// the same under-reporting the batch counter used to do.
+fn dir_status_line(one: &Renewal, directory: &str) -> String {
+    let (tag, failed) = if one.failures > 0 {
+        ("fail", format!(" · {} failed", one.failures))
+    } else {
+        ("ok", String::new())
+    };
+    format!(
+        "  {tag:<4} {:>7} files {:>6} dirs{failed}  {directory}",
+        one.files, one.dirs
+    )
+}
+
 struct PoolState {
     queue: VecDeque<Task>,
     in_flight: usize,
@@ -674,7 +703,7 @@ fn execute_serial(plan: &Plan, out: &Out) -> Renewal {
             }
             continue;
         }
-        let (n_files, n_dirs) = (walk.files.len(), walk.dirs.len());
+        let mut one = Renewal::default();
         for (batch, kind) in shard(walk.files, BATCH)
             .into_iter()
             .map(|b| (b, Kind::Files))
@@ -682,17 +711,18 @@ fn execute_serial(plan: &Plan, out: &Out) -> Renewal {
         {
             let (n, errs, tmsg) = touch_entries(&batch);
             match kind {
-                Kind::Files => renewal.files += n,
-                Kind::Dirs => renewal.dirs += n,
+                Kind::Files => one.files += n,
+                Kind::Dirs => one.dirs += n,
             }
             if errs > 0 {
-                renewal.failures += errs;
+                one.failures += errs;
                 out.error(&format!("FAIL touch {d} :: {tmsg}"));
             }
         }
         if !out.json_mode {
-            out.status(&format!("  ok {n_files:>7} files {n_dirs:>6} dirs  {d}"));
+            out.status(&dir_status_line(&one, d));
         }
+        renewal.add(&one);
     }
     renewal
 }
@@ -1006,6 +1036,38 @@ mod tests {
     #[test]
     fn touch_entries_empty_batch() {
         assert_eq!(touch_entries(&[]), (0, 0, "ok".to_string()));
+    }
+
+    #[test]
+    fn dir_status_line_reports_renewed_counts() {
+        assert_eq!(
+            dir_status_line(
+                &Renewal {
+                    files: 1386,
+                    dirs: 694,
+                    failures: 0
+                },
+                "/scratch/sparky/proj"
+            ),
+            "  ok      1386 files    694 dirs  /scratch/sparky/proj"
+        );
+    }
+
+    #[test]
+    fn dir_status_line_drops_the_ok_tag_when_anything_failed() {
+        // What the walk found is not what got renewed: a directory whose
+        // every touch was refused must not print as `ok`.
+        assert_eq!(
+            dir_status_line(
+                &Renewal {
+                    files: 0,
+                    dirs: 0,
+                    failures: 1386
+                },
+                "/scratch/sparky/proj"
+            ),
+            "  fail       0 files      0 dirs · 1386 failed  /scratch/sparky/proj"
+        );
     }
 
     #[test]
