@@ -6,22 +6,24 @@
 //! Only what Sol has explicitly flagged is renewed - never a wholesale
 //! `/scratch` walk.
 //!
-//! Execution is file-level-sharded: a streaming pipeline over one worker
-//! pool - enumerate a kept directory, split its files into evenly-sized
-//! batches, and touch the batches across the pool. A single huge directory
-//! fans out into many batches, so `-j` scales the parallelism of the whole
-//! run including its largest directory, not just the count of directories.
+//! Execution is entry-level-sharded: a streaming pipeline over one worker
+//! pool - enumerate a kept directory, split its files and subdirectories
+//! into evenly-sized batches, and touch the batches across the pool. A
+//! single huge directory fans out into many batches, so `-j` scales the
+//! parallelism of the whole run including its largest directory, not just
+//! the count of directories.
 //!
 //! This is metadata-heavy NFS I/O. On Sol run it on a compute node or the
 //! DTN (`ssh soldtn`), not a throttled login node.
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::ffi::CString;
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
 
-use filetime::FileTime;
 use serde_json::{json, Value};
 
 use crate::config::KeepRules;
@@ -146,24 +148,38 @@ pub fn build_plan(csv_dir: &Path, stages: &[String], keep: &KeepRules) -> Result
 // --- enumeration + touching ---------------------------------------------------
 //
 // Two task kinds run on one worker pool:
-//   enumerate_dir -- walk a kept directory, return its files
-//   touch_files   -- refresh timestamps on a batch of those files
-// touch is the expensive half (one metadata write per file), so it is
-// sharded into file batches and spread across the pool.
+//   enumerate_dir  -- walk a kept directory, return its entries
+//   touch_entries  -- refresh timestamps on a batch of those entries
+// touch is the expensive half (one metadata write per entry), so it is
+// sharded into batches and spread across the pool.
 
-/// List every regular file under `directory` in one walk.
+/// One kept directory's entries, as `enumerate_dir` found them.
+#[derive(Debug, Default)]
+pub struct Walk {
+    /// Regular files under the directory (`find DIR -type f`).
+    pub files: Vec<PathBuf>,
+    /// The directory itself plus every subdirectory (`find DIR -type d`).
+    pub dirs: Vec<PathBuf>,
+    /// `ok`, a `skipped: ...` note, or the walk error.
+    pub msg: String,
+}
+
+/// List every regular file and directory under `directory` in one walk.
 ///
-/// Matches `find DIR -type f`: hidden files included, no ignore files
-/// honored, symlinks not followed. Returns `(directory, files, message)`.
-/// A path that isn't a directory (e.g. flagged then removed) is reported as
-/// a benign skip, not an error.
-pub fn enumerate_dir(directory: &str) -> (String, Vec<PathBuf>, String) {
+/// Matches `find DIR -type f` plus `find DIR -type d`: hidden entries
+/// included, no ignore files honored, symlinks not followed (so a symlink -
+/// to a file or a directory - is never touched, and never walked into).
+/// The directory itself is the first entry of `dirs`, so the flagged
+/// directory's own timestamp is renewed too: touching a file does not move
+/// its parent's mtime, so a directory's stamp otherwise only ever moves
+/// when an entry is added or removed. A path that isn't a directory
+/// (e.g. flagged then removed) is reported as a benign skip, not an error.
+pub fn enumerate_dir(directory: &str) -> Walk {
     if !Path::new(directory).is_dir() {
-        return (
-            directory.to_string(),
-            Vec::new(),
-            "skipped: not a directory".to_string(),
-        );
+        return Walk {
+            msg: "skipped: not a directory".to_string(),
+            ..Walk::default()
+        };
     }
     let walker = ignore::WalkBuilder::new(directory)
         .hidden(false)
@@ -175,49 +191,85 @@ pub fn enumerate_dir(directory: &str) -> (String, Vec<PathBuf>, String) {
         .follow_links(false)
         .build();
     let mut files = Vec::new();
+    let mut dirs = Vec::new();
     let mut walk_error: Option<String> = None;
     for entry in walker {
         match entry {
-            Ok(e) => {
-                if e.file_type().is_some_and(|t| t.is_file()) {
-                    files.push(e.into_path());
-                }
-            }
+            Ok(e) => match e.file_type() {
+                Some(t) if t.is_file() => files.push(e.into_path()),
+                Some(t) if t.is_dir() => dirs.push(e.into_path()),
+                _ => {}
+            },
             Err(e) => walk_error = Some(e.to_string()),
         }
     }
     if let Some(msg) = walk_error {
-        return (directory.to_string(), Vec::new(), msg);
+        return Walk {
+            msg,
+            ..Walk::default()
+        };
     }
-    (directory.to_string(), files, "ok".to_string())
+    Walk {
+        files,
+        dirs,
+        msg: "ok".to_string(),
+    }
 }
 
-/// Refresh atime+mtime on a batch of files (`touch -a -m -c` semantics).
+/// Set one path's atime+mtime to now - `touch -a -m` on a single entry.
 ///
-/// Returns `(files_attempted, errors, message)`. A file deleted between
-/// enumeration and touch is silently skipped, not an error, and nothing is
-/// ever created. A real failure (permission, I/O) is counted and surfaced.
-pub fn touch_files(paths: &[PathBuf]) -> (usize, usize, String) {
-    if paths.is_empty() {
-        return (0, 0, "ok".to_string());
+/// `utimensat` with a NULL `times` is the "both stamps to now" form, and
+/// per utimensat(2) it needs only **write permission** on the entry.
+/// Passing explicit stamps - what `filetime::set_file_times` does, even
+/// for "now" - lands in the other clause of the same rule and requires
+/// **ownership**, which EPERMs on a collaborator's `0666`/`0777` file
+/// sitting in your own `/scratch` tree. Shared project directories are
+/// full of exactly those files, so keep renews with the form plain
+/// coreutils `touch` uses.
+fn touch_now(path: &Path) -> std::io::Result<()> {
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    // SAFETY: `c_path` is a valid NUL-terminated string that outlives the
+    // call, and a null `times` is the documented set-both-to-now form.
+    let rc = unsafe { libc::utimensat(libc::AT_FDCWD, c_path.as_ptr(), std::ptr::null(), 0) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
     }
-    let now = FileTime::now();
+}
+
+/// Refresh atime+mtime on a batch of entries (`touch -a -m -c` semantics).
+///
+/// Returns `(renewed, errors, message)`: how many entries got fresh stamps,
+/// how many failed, and the first failure suffixed with the count of the
+/// rest (`... (and N more in this batch)`) - a whole shard can fail, and
+/// the summary has to show that without emitting `BATCH` lines. An entry
+/// deleted between enumeration and touch is neither renewed nor an error,
+/// and nothing is ever created.
+pub fn touch_entries(paths: &[PathBuf]) -> (usize, usize, String) {
+    let mut renewed = 0;
     let mut errors = 0;
     let mut msg = "ok".to_string();
     for p in paths {
-        match filetime::set_file_times(p, now, now) {
-            Ok(()) => {}
+        match touch_now(p) {
+            Ok(()) => renewed += 1,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => {
-                errors = 1;
-                msg = format!("touch {}: {e}", p.display());
+                errors += 1;
+                if errors == 1 {
+                    msg = format!("touch {}: {e}", p.display());
+                }
             }
         }
     }
-    (paths.len(), errors, msg)
+    if errors > 1 {
+        msg = format!("{msg} (and {} more in this batch)", errors - 1);
+    }
+    (renewed, errors, msg)
 }
 
-/// Split a flat file list into evenly-sized batches for the touch pool.
+/// Split a flat entry list into evenly-sized batches for the touch pool.
 pub fn shard(files: Vec<PathBuf>, batch_size: usize) -> Vec<Vec<PathBuf>> {
     if files.is_empty() {
         return Vec::new();
@@ -340,15 +392,16 @@ pub fn cmd_keep(opts: &KeepOptions, out: &Out) -> i32 {
         }
     }
 
-    let (total_files, failures) = execute(&plan, opts.jobs_n, out);
+    let renewal = execute(&plan, opts.jobs_n, out);
 
     if out.json_mode {
         let kept_truncated = plan.kept.len() > JSON_LIST_CAP;
         let mut summary = json!({
             "renewed": true,
             "dirs": plan.kept.len(),
-            "files_touched": total_files,
-            "failures": failures,
+            "files_touched": renewal.files,
+            "dirs_touched": renewal.dirs,
+            "failures": renewal.failures,
             "kept_truncated": kept_truncated,
             "kept": plan.kept.iter().take(JSON_LIST_CAP).map(|(_, d)| d.clone()).collect::<Vec<_>>(),
         });
@@ -363,17 +416,19 @@ pub fn cmd_keep(opts: &KeepOptions, out: &Out) -> i32 {
         }
         out.json(&summary);
     } else {
-        let failed = if failures > 0 {
-            format!(" · {failures} failed")
+        let failed = if renewal.failures > 0 {
+            format!(" · {} failed", renewal.failures)
         } else {
             String::new()
         };
         out.status(&format!(
-            "done {} dirs · {total_files} files touched{failed}",
-            plan.kept.len()
+            "done {} flagged dirs · touched {} files + {} dirs{failed}",
+            plan.kept.len(),
+            renewal.files,
+            renewal.dirs
         ));
     }
-    if failures > 0 {
+    if renewal.failures > 0 {
         1
     } else {
         0
@@ -492,23 +547,42 @@ fn dump_full_plan(plan: &Plan, csv_dir: &Path, stages: &[String]) -> Result<Stri
 
 enum Task {
     Enumerate(String),
-    Touch(String, Vec<PathBuf>),
+    Touch(String, Vec<PathBuf>, Kind),
+}
+
+/// Which counter a touched batch lands in.
+#[derive(Clone, Copy)]
+enum Kind {
+    Files,
+    Dirs,
+}
+
+/// What a renewal pass actually renewed.
+///
+/// `files` and `dirs` count entries that got fresh stamps - an entry that
+/// vanished between enumeration and touch is in neither. `failures` counts
+/// failed *operations*: one per entry that could not be touched, plus one
+/// per directory that could not be walked.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Renewal {
+    pub files: usize,
+    pub dirs: usize,
+    pub failures: usize,
 }
 
 struct PoolState {
     queue: VecDeque<Task>,
     in_flight: usize,
-    total_files: usize,
-    failures: usize,
+    renewal: Renewal,
 }
 
-/// Renew `plan.kept`. Returns `(files_touched, failures)`.
+/// Renew `plan.kept`.
 ///
 /// With `jobs_n <= 1` runs serially (no pool - fast and deterministic for
 /// small runs). Otherwise one worker pool runs both halves: enumerate a
-/// directory, shard its files, and queue the batches as touch tasks, so a
+/// directory, shard its entries, and queue the batches as touch tasks, so a
 /// single huge directory spreads its batches over every worker.
-pub fn execute(plan: &Plan, jobs_n: u64, out: &Out) -> (usize, usize) {
+pub fn execute(plan: &Plan, jobs_n: u64, out: &Out) -> Renewal {
     if jobs_n <= 1 {
         return execute_serial(plan, out);
     }
@@ -520,8 +594,7 @@ pub fn execute(plan: &Plan, jobs_n: u64, out: &Out) -> (usize, usize) {
             .map(|(_, d)| Task::Enumerate(d.clone()))
             .collect(),
         in_flight: 0,
-        total_files: 0,
-        failures: 0,
+        renewal: Renewal::default(),
     });
     let ready = Condvar::new();
     let out = *out;
@@ -532,8 +605,7 @@ pub fn execute(plan: &Plan, jobs_n: u64, out: &Out) -> (usize, usize) {
         }
     });
 
-    let final_state = state.into_inner().expect("pool lock");
-    (final_state.total_files, final_state.failures)
+    state.into_inner().expect("pool lock").renewal
 }
 
 fn worker(state: &Mutex<PoolState>, ready: &Condvar, out: &Out) {
@@ -556,25 +628,32 @@ fn worker(state: &Mutex<PoolState>, ready: &Condvar, out: &Out) {
 
         match task {
             Task::Enumerate(d) => {
-                let (_, files, msg) = enumerate_dir(&d);
+                let walk = enumerate_dir(&d);
                 let mut s = state.lock().expect("pool lock");
-                if msg == "ok" {
-                    for batch in shard(files, BATCH) {
-                        s.queue.push_back(Task::Touch(d.clone(), batch));
+                if walk.msg == "ok" {
+                    for batch in shard(walk.files, BATCH) {
+                        s.queue
+                            .push_back(Task::Touch(d.clone(), batch, Kind::Files));
                     }
-                } else if !msg.starts_with("skipped") {
-                    s.failures += 1;
-                    out.error(&format!("FAIL enumerate {d} :: {msg}"));
+                    for batch in shard(walk.dirs, BATCH) {
+                        s.queue.push_back(Task::Touch(d.clone(), batch, Kind::Dirs));
+                    }
+                } else if !walk.msg.starts_with("skipped") {
+                    s.renewal.failures += 1;
+                    out.error(&format!("FAIL enumerate {d} :: {}", walk.msg));
                 }
                 s.in_flight -= 1;
                 ready.notify_all();
             }
-            Task::Touch(d, batch) => {
-                let (n, errs, msg) = touch_files(&batch);
+            Task::Touch(d, batch, kind) => {
+                let (n, errs, msg) = touch_entries(&batch);
                 let mut s = state.lock().expect("pool lock");
-                s.total_files += n;
+                match kind {
+                    Kind::Files => s.renewal.files += n,
+                    Kind::Dirs => s.renewal.dirs += n,
+                }
                 if errs > 0 {
-                    s.failures += 1;
+                    s.renewal.failures += errs;
                     out.error(&format!("FAIL touch {d} :: {msg}"));
                 }
                 s.in_flight -= 1;
@@ -584,35 +663,44 @@ fn worker(state: &Mutex<PoolState>, ready: &Condvar, out: &Out) {
     }
 }
 
-fn execute_serial(plan: &Plan, out: &Out) -> (usize, usize) {
-    let mut total_files = 0;
-    let mut failures = 0;
+fn execute_serial(plan: &Plan, out: &Out) -> Renewal {
+    let mut renewal = Renewal::default();
     for (_, d) in &plan.kept {
-        let (_, files, msg) = enumerate_dir(d);
-        if msg != "ok" && !msg.starts_with("skipped") {
-            failures += 1;
-            out.error(&format!("FAIL enumerate {d} :: {msg}"));
+        let walk = enumerate_dir(d);
+        if walk.msg != "ok" {
+            if !walk.msg.starts_with("skipped") {
+                renewal.failures += 1;
+                out.error(&format!("FAIL enumerate {d} :: {}", walk.msg));
+            }
             continue;
         }
-        let count = files.len();
-        for batch in shard(files, BATCH) {
-            let (n, errs, tmsg) = touch_files(&batch);
-            total_files += n;
+        let (n_files, n_dirs) = (walk.files.len(), walk.dirs.len());
+        for (batch, kind) in shard(walk.files, BATCH)
+            .into_iter()
+            .map(|b| (b, Kind::Files))
+            .chain(shard(walk.dirs, BATCH).into_iter().map(|b| (b, Kind::Dirs)))
+        {
+            let (n, errs, tmsg) = touch_entries(&batch);
+            match kind {
+                Kind::Files => renewal.files += n,
+                Kind::Dirs => renewal.dirs += n,
+            }
             if errs > 0 {
-                failures += 1;
+                renewal.failures += errs;
                 out.error(&format!("FAIL touch {d} :: {tmsg}"));
             }
         }
-        if msg == "ok" && !out.json_mode {
-            out.status(&format!("  ok {count:>7} files  {d}"));
+        if !out.json_mode {
+            out.status(&format!("  ok {n_files:>7} files {n_dirs:>6} dirs  {d}"));
         }
     }
-    (total_files, failures)
+    renewal
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use filetime::FileTime;
     use std::fs;
 
     fn keep(include: &[&str], exclude: &[&str]) -> KeepRules {
@@ -799,11 +887,30 @@ mod tests {
         fs::write(dir.path().join(".gitignore"), "ignored.txt\n").unwrap();
         fs::write(dir.path().join("ignored.txt"), "x").unwrap();
 
-        let (_, files, msg) = enumerate_dir(dir.path().to_str().unwrap());
-        assert_eq!(msg, "ok");
-        assert!(files.iter().all(|p| p.is_file()));
+        let walk = enumerate_dir(dir.path().to_str().unwrap());
+        assert_eq!(walk.msg, "ok");
+        assert!(walk.files.iter().all(|p| p.is_file()));
         // 5 regular files: a.txt, .hidden, sub/b.txt, .gitignore, ignored.txt
-        assert_eq!(files.len(), 5);
+        assert_eq!(walk.files.len(), 5);
+        // The flagged directory itself comes first, then `sub`.
+        assert_eq!(
+            walk.dirs,
+            [dir.path().to_path_buf(), dir.path().join("sub")]
+        );
+    }
+
+    #[test]
+    fn enumerate_dir_skips_symlinked_dirs() {
+        // `find -type d` does not count a symlink to a directory, and the
+        // walker does not descend into one either.
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("real")).unwrap();
+        fs::write(dir.path().join("real/inside.txt"), "x").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("real"), dir.path().join("link")).unwrap();
+        let walk = enumerate_dir(dir.path().to_str().unwrap());
+        assert_eq!(walk.msg, "ok");
+        assert_eq!(walk.dirs.len(), 2); // root + real
+        assert_eq!(walk.files.len(), 1); // real/inside.txt, not through the link
     }
 
     #[test]
@@ -813,47 +920,92 @@ mod tests {
         fs::write(dir.path().join("real.txt"), "x").unwrap();
         std::os::unix::fs::symlink(dir.path().join("real.txt"), dir.path().join("link.txt"))
             .unwrap();
-        let (_, files, msg) = enumerate_dir(dir.path().to_str().unwrap());
-        assert_eq!(msg, "ok");
-        assert_eq!(files.len(), 1);
+        let walk = enumerate_dir(dir.path().to_str().unwrap());
+        assert_eq!(walk.msg, "ok");
+        assert_eq!(walk.files.len(), 1);
     }
 
     #[test]
     fn enumerate_dir_not_a_directory() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("nope");
-        let (_, files, msg) = enumerate_dir(missing.to_str().unwrap());
-        assert!(files.is_empty());
-        assert!(msg.starts_with("skipped"));
+        let walk = enumerate_dir(missing.to_str().unwrap());
+        assert!(walk.files.is_empty());
+        assert!(walk.dirs.is_empty());
+        assert!(walk.msg.starts_with("skipped"));
+    }
+
+    /// Backdate an entry so a renewal is visible.
+    fn backdate(p: &Path) {
+        let old = FileTime::from_unix_time(FileTime::now().unix_seconds() - 8_640_000, 0);
+        filetime::set_file_times(p, old, old).unwrap();
+    }
+
+    fn is_fresh(p: &Path) -> bool {
+        let mtime = FileTime::from_last_modification_time(&p.metadata().unwrap());
+        mtime.unix_seconds() > FileTime::now().unix_seconds() - 10
     }
 
     #[test]
-    fn touch_files_refreshes_times() {
+    fn touch_entries_refreshes_times() {
         let dir = tempfile::tempdir().unwrap();
         let f = dir.path().join("stale.txt");
         fs::write(&f, "x").unwrap();
-        let old = FileTime::from_unix_time(FileTime::now().unix_seconds() - 8_640_000, 0);
-        filetime::set_file_times(&f, old, old).unwrap();
+        backdate(&f);
 
-        let (attempted, errors, _) = touch_files(std::slice::from_ref(&f));
-        assert_eq!((attempted, errors), (1, 0));
-        let mtime = FileTime::from_last_modification_time(&f.metadata().unwrap());
-        assert!(mtime.unix_seconds() > FileTime::now().unix_seconds() - 10);
+        let (renewed, errors, _) = touch_entries(std::slice::from_ref(&f));
+        assert_eq!((renewed, errors), (1, 0));
+        assert!(is_fresh(&f));
     }
 
     #[test]
-    fn touch_files_missing_path_is_silent_skip() {
+    fn touch_entries_refreshes_a_directory() {
+        // A directory's own stamp only moves when an entry is added or
+        // removed, so `keep` has to touch it directly.
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        backdate(&sub);
+
+        let (renewed, errors, _) = touch_entries(std::slice::from_ref(&sub));
+        assert_eq!((renewed, errors), (1, 0));
+        assert!(is_fresh(&sub));
+    }
+
+    #[test]
+    fn touch_entries_missing_path_is_silent_skip() {
         let dir = tempfile::tempdir().unwrap();
         let ghost = dir.path().join("gone.txt");
-        let (attempted, errors, msg) = touch_files(std::slice::from_ref(&ghost));
-        assert_eq!((attempted, errors), (1, 0));
+        let (renewed, errors, msg) = touch_entries(std::slice::from_ref(&ghost));
+        assert_eq!((renewed, errors), (0, 0)); // not renewed, not a failure
         assert_eq!(msg, "ok");
         assert!(!ghost.exists()); // never created
     }
 
     #[test]
-    fn touch_files_empty_batch() {
-        assert_eq!(touch_files(&[]), (0, 0, "ok".to_string()));
+    fn touch_entries_counts_every_failure_in_the_batch() {
+        // Every failure counts, and the message names the first one plus how
+        // many followed - a whole shard can fail (a collaborator's files
+        // before the utimensat fix), and one line must not stand for 2000.
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("regular.txt");
+        fs::write(&f, "x").unwrap();
+        // A path *through* a regular file is ENOTDIR, not NotFound.
+        let bad: Vec<PathBuf> = (0..3).map(|i| f.join(format!("ghost-{i}"))).collect();
+        let batch: Vec<PathBuf> = bad.iter().cloned().chain([f.clone()]).collect();
+
+        let (renewed, errors, msg) = touch_entries(&batch);
+        assert_eq!((renewed, errors), (1, 3));
+        assert!(
+            msg.starts_with(&format!("touch {}", bad[0].display())),
+            "{msg}"
+        );
+        assert!(msg.ends_with("(and 2 more in this batch)"), "{msg}");
+    }
+
+    #[test]
+    fn touch_entries_empty_batch() {
+        assert_eq!(touch_entries(&[]), (0, 0, "ok".to_string()));
     }
 
     #[test]
@@ -874,8 +1026,16 @@ mod tests {
             json_mode: true,
             interactive: false,
         };
-        let (files, failures) = execute(&plan, 1, &out);
-        assert_eq!((files, failures), (2, 0));
+        // Two files plus the kept directory itself; the missing dir is a
+        // benign skip, not a failure.
+        assert_eq!(
+            execute(&plan, 1, &out),
+            Renewal {
+                files: 2,
+                dirs: 1,
+                failures: 0
+            }
+        );
     }
 
     #[test]
@@ -898,8 +1058,15 @@ mod tests {
             json_mode: true,
             interactive: false,
         };
-        let (files, failures) = execute(&plan, 4, &out);
-        assert_eq!((files, failures), (35, 0));
+        // 5 dirs x 7 files, plus each of the 5 kept dirs themselves.
+        assert_eq!(
+            execute(&plan, 4, &out),
+            Renewal {
+                files: 35,
+                dirs: 5,
+                failures: 0
+            }
+        );
     }
 
     #[test]

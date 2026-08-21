@@ -274,13 +274,16 @@ fn keep_dry_run_plan_filters_by_keep_block() {
 fn keep_renews_real_files() {
     let sb = Sandbox::new();
     // A [keep] block pointing inside the sandbox, plus a flagged dir with a
-    // stale file.
+    // stale file - and stale directory stamps on the flagged dir and its
+    // subdirectory, which only a direct touch can move.
     let scratch = sb.home.path().join("scratch");
     fs::create_dir_all(scratch.join("proj/sub")).unwrap();
     let stale = scratch.join("proj/sub/stale.bin");
     fs::write(&stale, "x").unwrap();
     let old = filetime::FileTime::from_unix_time(1_000_000, 0);
-    filetime::set_file_times(&stale, old, old).unwrap();
+    for p in [&stale, &scratch.join("proj/sub"), &scratch.join("proj")] {
+        filetime::set_file_times(p, old, old).unwrap();
+    }
 
     fs::write(
         sb.home.path().join(".config/solx/config.toml"),
@@ -305,10 +308,20 @@ fn keep_renews_real_files() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"files_touched\": 1"))
+        .stdout(predicate::str::contains("\"dirs_touched\": 2"))
         .stdout(predicate::str::contains("\"failures\": 0"));
 
-    let mtime = filetime::FileTime::from_last_modification_time(&stale.metadata().unwrap());
-    assert!(mtime.unix_seconds() > 1_000_000, "stale file renewed");
+    for (p, what) in [
+        (&stale, "stale file renewed"),
+        (&scratch.join("proj/sub"), "subdirectory renewed"),
+        (
+            &scratch.join("proj"),
+            "the flagged directory itself renewed",
+        ),
+    ] {
+        let mtime = filetime::FileTime::from_last_modification_time(&p.metadata().unwrap());
+        assert!(mtime.unix_seconds() > 1_000_000, "{what}");
+    }
 }
 
 #[test]

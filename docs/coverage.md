@@ -5,14 +5,18 @@ automated verification, and what's a known gap. The eval harness
 requires manual orchestration today, so this document is updated by
 hand before each release.
 
-**Version:** v1.0.2 (see [`../CHANGELOG.md`](../CHANGELOG.md))
+**Version:** v1.0.3 (see [`../CHANGELOG.md`](../CHANGELOG.md))
 **Last verified:** the `solx` CLI is covered by its own crate suite
 (`cargo test` in `solx/`: unit tests per module plus the end-to-end
 `tests/cli.rs`, including a real-touch renewal test), which runs in CI.
-**1.0.2** (2026-07-16) was a CLI-only release - skill guidance unchanged -
-so per [`../DEVELOPMENT.md`](../DEVELOPMENT.md) it was gated by that crate
-suite plus an L3 CLI smoke on real Sol (the nested `job jump` fix and the
-shipped binary exercised on a Sol compute node), not a skill-eval re-run.
+**1.0.2** (2026-07-16) and **1.0.3** (2026-08-21) were CLI-only releases -
+skill guidance unchanged - so per [`../DEVELOPMENT.md`](../DEVELOPMENT.md)
+each was gated by that crate suite plus an L3 CLI smoke on real Sol, not a
+skill-eval re-run. For 1.0.2 that smoke was the nested `job jump` fix; for
+1.0.3 it was a `solx keep` pass on a BeeGFS `/scratch` tree of 2,080 entries
+owned by another user (1.0.2 renewed none of them and reported a single
+failure; 1.0.3 renewed 1,386 files and 694 directories with zero failures,
+leaving nothing stale).
 The skill-level L1/L2/L3 evals for the `solx`-driven flows are **pending
 re-run on Sol** and are marked 🟡 below.
 
@@ -76,6 +80,9 @@ to the skill should mean adding a row here in the same group.
 | Refuses to bulk-touch `/scratch` (`find -exec touch`) | 🟡 documented | Negative assertion; not yet probed |
 | `solx keep --dry-run` plan correctness | 🟢 tested | `solx/src/keep.rs`, `solx/tests/cli.rs::keep_dry_run_plan_filters_by_keep_block`: dry-run plans without touching; JSON plan bounded |
 | `solx keep` refreshes kept files (recursively) | 🟢 tested | `solx/tests/cli.rs::keep_renews_real_files`: mtimes refresh across the tree |
+| `solx keep` refreshes directories too, flagged directory included | 🟢 tested | `solx/tests/cli.rs::keep_renews_real_files` (`dirs_touched`) + `solx/src/keep.rs::enumerate_dir` vectors |
+| `solx keep` renews writable entries owned by another user | 🟡 documented | Needs a second uid, so it's an L3 check, not a unit test: verified for 1.0.3 on Sol (issue #47). `keep.rs` unit vectors cover the failure *counting* path |
+| Renewal failures counted per entry, not per shard | 🟢 tested | `solx/src/keep.rs::touch_entries_counts_every_failure_in_the_batch` |
 | keep-list carve-outs honored at run time (`.venv`/`__pycache__` skipped, non-kept dirs skipped) | 🟢 tested | `solx/src/keep.rs` (matcher vectors) + `solx/tests/cli.rs` (end-to-end) |
 | File sharing procedure (`chmod` / `install` / `cp` between users) | 🟡 documented | |
 | Scratch-quota-exceeded behavior | 🔴 gap | Would need a fault-injection mock |

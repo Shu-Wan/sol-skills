@@ -1,6 +1,6 @@
 [package]
 name = "solx"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2021"
 description = "CLI for ASU's Sol supercomputer."
 license = "MIT"
@@ -16,7 +16,6 @@ serde_json = { version = "1", features = ["preserve_order"] }
 toml = { version = "0.8", features = ["preserve_order"] }
 csv = "1"
 ignore = "0.4"
-filetime = "0.2"
 shlex = "1"
 regex = "1"
 libc = "0.2"
@@ -24,4 +23,5 @@ tempfile = "3"
 
 [dev-dependencies]
 assert_cmd = "2"
+filetime = "0.2"
 predicates = "3"

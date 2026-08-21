@@ -11,6 +11,42 @@ version matches the `version` field in [`solx/Cargo.toml`](solx/Cargo.toml)
 and in [`skills/sol-skill/SKILL.md`](skills/sol-skill/SKILL.md), and the git
 tag, and a pushed `vX.Y.Z` tag builds and publishes the release.
 
+## [1.0.3] - 2026-08-21
+
+### Fixed
+
+- **`solx keep` now renews files and directories you can write but don't
+  own** (issue #47). The renewal used `filetime::set_file_times`, which always
+  hands `utimensat` an explicit `[timespec; 2]` - even when the value is
+  "now". Per utimensat(2) that form requires **ownership** of the entry, while
+  the NULL-`times` form plain `touch` uses requires only **write permission**.
+  So every collaborator-owned file in a shared `/scratch` project tree failed
+  with `Operation not permitted (os error 1)` and was left to be purged, even
+  at mode `0777` in a directory the caller owns. `keep` now calls
+  `utimensat(AT_FDCWD, path, NULL, 0)` directly - identical semantics, the
+  permission rule plain `touch` gets. Verified on Sol's BeeGFS `/scratch`
+  against a 2,080-entry labmate-owned tree: 1.0.2 renewed none of it and
+  reported one failure, 1.0.3 renews all of it with zero.
+- **The failure counter no longer hides up to `BATCH` (2000) failures per
+  shard.** A batch assigned `errors = 1` instead of accumulating, and each
+  message overwrote the last, so a shard where every file failed reported one
+  failure and one path - on the tree that surfaced this, 7 reported failures
+  stood for roughly 19,700 unrenewed entries. Failures are now counted per
+  entry, and the message keeps the first path plus `(and N more in this
+  batch)`. `files_touched` likewise counts entries that actually got fresh
+  stamps rather than entries attempted, so a failed pass can no longer read
+  as a successful one.
+
+### Changed
+
+- **`solx keep` refreshes directory timestamps too**, the flagged directory
+  itself included, and reports them in a new `dirs_touched` JSON field
+  (`done N flagged dirs · touched X files + Y dirs` in the human summary).
+  Enumeration was files-only (`find DIR -type f`), and touching a file does
+  not move its parent's mtime, so a directory's own stamp only ever moved when
+  an entry was added or removed - the very directory Sol flagged could not be
+  refreshed. Symlinks are still neither touched nor followed.
+
 ## [1.0.2] - 2026-07-16
 
 ### Fixed
@@ -564,7 +600,8 @@ agentskills.io-compatible layout (skill content under
 CSV-driven `/scratch` renewal, and shipped the original references
 (`module.md`, `scratch.md`, `sharing.md`, `slurm.md`).
 
-[Unreleased]: https://github.com/Shu-Wan/solx/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/Shu-Wan/solx/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/Shu-Wan/solx/releases/tag/v1.0.3
 [1.0.2]: https://github.com/Shu-Wan/solx/releases/tag/v1.0.2
 [1.0.1]: https://github.com/Shu-Wan/solx/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Shu-Wan/solx/releases/tag/v1.0.0
