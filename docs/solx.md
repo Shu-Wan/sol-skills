@@ -365,8 +365,7 @@ The touch itself is `utimensat(AT_FDCWD, path, NULL, 0)`, the same "both
 stamps to now" call plain `touch` makes. That form needs only **write
 permission** on the entry; a call that passes explicit timestamps needs
 **ownership** and fails with `Operation not permitted` on a labmate's file,
-even a world-writable one in your own tree. Before v1.0.3 `solx keep` used
-the explicit form and so renewed nothing a collaborator owned.
+even a world-writable one in your own tree.
 
 The `--json` summary counts what actually changed: `files_touched` and
 `dirs_touched` are entries that got fresh stamps (an entry deleted between

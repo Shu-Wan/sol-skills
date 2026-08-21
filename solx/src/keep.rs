@@ -218,9 +218,9 @@ pub fn enumerate_dir(directory: &str) -> Walk {
 /// Set one path's atime+mtime to now - `touch -a -m` on a single entry.
 ///
 /// A NULL `times` is the "both stamps to now" form, which per utimensat(2)
-/// needs only **write permission**. Explicit stamps - what
-/// `filetime::set_file_times` passes, even for "now" - need **ownership**,
-/// so they EPERM on a collaborator's file in your own `/scratch` tree.
+/// needs only **write permission**. Explicit stamps need **ownership**, so
+/// any helper that passes them (`filetime::set_file_times`) EPERMs on a
+/// collaborator's file inside your own `/scratch` tree.
 fn touch_now(path: &Path) -> std::io::Result<()> {
     let c_path = CString::new(path.as_os_str().as_bytes())
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
@@ -999,9 +999,9 @@ mod tests {
 
     #[test]
     fn touch_entries_counts_every_failure_in_the_batch() {
-        // Every failure counts, and the message names the first one plus how
-        // many followed - a whole shard can fail (a collaborator's files
-        // before the utimensat fix), and one line must not stand for 2000.
+        // Every failure counts, and the message names the first one plus
+        // how many followed - a whole shard can fail, and one line must not
+        // stand for 2000.
         let dir = tempfile::tempdir().unwrap();
         let f = dir.path().join("regular.txt");
         fs::write(&f, "x").unwrap();
