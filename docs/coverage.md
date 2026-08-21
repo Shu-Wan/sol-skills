@@ -13,10 +13,11 @@ hand before each release.
 skill guidance unchanged - so per [`../DEVELOPMENT.md`](../DEVELOPMENT.md)
 each was gated by that crate suite plus an L3 CLI smoke on real Sol, not a
 skill-eval re-run. For 1.0.2 that smoke was the nested `job jump` fix; for
-1.0.3 it was a `solx keep` pass on a BeeGFS `/scratch` tree of 2,080 entries
-owned by another user (1.0.2 renewed none of them and reported a single
-failure; 1.0.3 renewed 1,386 files and 694 directories with zero failures,
-leaving nothing stale).
+1.0.3 it was the CI-built musl binary run against a BeeGFS `/scratch` sample
+of 50 flagged directories holding 150 entries owned by another user (100
+files + 50 directories, all stale beforehand). 1.0.2 emitted 50 FAIL lines,
+reported `files_touched: 100` with `failures: 50`, and left all 150 entries
+stale; 1.0.3 renewed all 150, reported `failures: 0`, and left none stale.
 The skill-level L1/L2/L3 evals for the `solx`-driven flows are **pending
 re-run on Sol** and are marked 🟡 below.
 

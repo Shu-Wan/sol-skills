@@ -25,8 +25,10 @@ tag, and a pushed `vX.Y.Z` tag builds and publishes the release.
   at mode `0777` in a directory the caller owns. `keep` now calls
   `utimensat(AT_FDCWD, path, NULL, 0)` directly - identical semantics, the
   permission rule plain `touch` gets. Verified on Sol's BeeGFS `/scratch`
-  against a 2,080-entry labmate-owned tree: 1.0.2 renewed none of it and
-  reported one failure, 1.0.3 renews all of it with zero.
+  with the shipped musl binary, over 50 flagged directories holding 150
+  labmate-owned entries (100 files + 50 directories, every one stale): 1.0.2
+  emitted 50 FAIL lines, renewed nothing, and left all 150 stale; 1.0.3
+  renewed all 150 with zero failures and nothing left stale.
 - **The failure counter no longer hides up to `BATCH` (2000) failures per
   shard.** A batch assigned `errors = 1` instead of accumulating, and each
   message overwrote the last, so a shard where every file failed reported one
