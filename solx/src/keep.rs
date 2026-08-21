@@ -167,16 +167,12 @@ pub struct Walk {
 /// List every regular file and directory under `directory` in one walk.
 ///
 /// Matches `find DIR -type f` plus `find DIR -type d`: hidden entries
-/// included, no ignore files honored, symlinks not followed (so a symlink -
-/// to a file or a directory - is never touched, and never walked into).
-/// `dirs` holds the directory itself along with every subdirectory, so the
-/// flagged directory's own timestamp is renewed too: touching a file does
-/// not move its parent's mtime, so a directory's stamp otherwise only ever
-/// moves when an entry is added or removed. Nothing here depends on the
-/// order the walker yields entries in (it yields the root first, which
-/// `enumerate_dir_lists_all_including_hidden_and_ignored` pins) - every
-/// entry is touched exactly once either way. A path that isn't a directory
-/// (e.g. flagged then removed) is reported as a benign skip, not an error.
+/// included, no ignore files honored, symlinks neither touched nor followed.
+/// `dirs` includes the directory itself - touching a file doesn't move its
+/// parent's mtime, so a directory's own stamp has to be set directly; the
+/// order entries come back in is the walker's and nothing depends on it. A
+/// path that isn't a directory (flagged then removed) is a benign skip, not
+/// an error.
 pub fn enumerate_dir(directory: &str) -> Walk {
     if !Path::new(directory).is_dir() {
         return Walk {
@@ -221,14 +217,10 @@ pub fn enumerate_dir(directory: &str) -> Walk {
 
 /// Set one path's atime+mtime to now - `touch -a -m` on a single entry.
 ///
-/// `utimensat` with a NULL `times` is the "both stamps to now" form, and
-/// per utimensat(2) it needs only **write permission** on the entry.
-/// Passing explicit stamps - what `filetime::set_file_times` does, even
-/// for "now" - lands in the other clause of the same rule and requires
-/// **ownership**, which EPERMs on a collaborator's `0666`/`0777` file
-/// sitting in your own `/scratch` tree. Shared project directories are
-/// full of exactly those files, so keep renews with the form plain
-/// coreutils `touch` uses.
+/// A NULL `times` is the "both stamps to now" form, which per utimensat(2)
+/// needs only **write permission**. Explicit stamps - what
+/// `filetime::set_file_times` passes, even for "now" - need **ownership**,
+/// so they EPERM on a collaborator's file in your own `/scratch` tree.
 fn touch_now(path: &Path) -> std::io::Result<()> {
     let c_path = CString::new(path.as_os_str().as_bytes())
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
@@ -244,12 +236,10 @@ fn touch_now(path: &Path) -> std::io::Result<()> {
 
 /// Refresh atime+mtime on a batch of entries (`touch -a -m -c` semantics).
 ///
-/// Returns `(renewed, errors, message)`: how many entries got fresh stamps,
-/// how many failed, and the first failure suffixed with the count of the
-/// rest (`... (and N more in this batch)`) - a whole shard can fail, and
-/// the summary has to show that without emitting `BATCH` lines. An entry
-/// deleted between enumeration and touch is neither renewed nor an error,
-/// and nothing is ever created.
+/// Returns `(renewed, errors, message)`, the message naming the first
+/// failure plus how many followed - a whole shard can fail, and that has to
+/// be legible without `BATCH` lines. An entry deleted between enumeration
+/// and touch is neither renewed nor an error, and nothing is ever created.
 pub fn touch_entries(paths: &[PathBuf]) -> (usize, usize, String) {
     let mut renewed = 0;
     let mut errors = 0;
@@ -560,12 +550,10 @@ enum Kind {
     Dirs,
 }
 
-/// What a renewal pass actually renewed.
-///
-/// `files` and `dirs` count entries that got fresh stamps - an entry that
-/// vanished between enumeration and touch is in neither. `failures` counts
-/// failed *operations*: one per entry that could not be touched, plus one
-/// per directory that could not be walked.
+/// What a renewal pass actually renewed: entries that got fresh stamps
+/// (an entry that vanished mid-run is in neither count), and failed
+/// *operations* - one per entry that couldn't be touched, plus one per
+/// directory that couldn't be walked.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Renewal {
     pub files: usize,
@@ -581,12 +569,9 @@ impl Renewal {
     }
 }
 
-/// The serial mode's per-directory progress line.
-///
-/// It reports what the directory actually *renewed*, not what the walk
-/// found, and drops the `ok` tag as soon as anything failed - a line that
-/// reads `ok 1386 files` over a directory where every touch was refused is
-/// the same under-reporting the batch counter used to do.
+/// The serial mode's per-directory progress line: what the directory
+/// actually renewed, with no `ok` tag once anything failed (`ok 1386 files`
+/// over a directory where every touch was refused is under-reporting).
 fn dir_status_line(one: &Renewal, directory: &str) -> String {
     let (tag, failed) = if one.failures > 0 {
         ("fail", format!(" · {} failed", one.failures))
