@@ -48,6 +48,10 @@ tag, and a pushed `vX.Y.Z` tag builds and publishes the release.
   not move its parent's mtime, so a directory's own stamp only ever moved when
   an entry was added or removed - the very directory Sol flagged could not be
   refreshed. Symlinks are still neither touched nor followed.
+- **The serial (`-j 1`) per-directory progress line reports what was renewed**,
+  not what the walk found, and drops its `ok` tag as soon as anything failed
+  (`fail 1 files 2 dirs · 1 failed`). It used to print `ok` with the
+  enumerated counts even when every touch in that directory was refused.
 
 ## [1.0.2] - 2026-07-16
 
