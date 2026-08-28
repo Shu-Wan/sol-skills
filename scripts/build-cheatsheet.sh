@@ -1,33 +1,35 @@
 #!/usr/bin/env bash
-# Build the Sol cheatsheet PDF from the skill's markdown source.
-# Requires pandoc + a LaTeX engine (xelatex/pdflatex). On Sol, `tinytex`
-# provides the engine (see SKILL.md "Getting the Software You Need").
+# Build the Sol cheatsheet PDF from the skill's Markdown source.
+# A small ReportLab renderer turns the single Markdown source into a compact,
+# card-based landscape layout. uv provides the pinned Python dependencies.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$ROOT/skills/sol-skill/references/cheatsheet.md"
 OUT="$ROOT/docs/cheatsheet.pdf"
 
-command -v pandoc >/dev/null || { echo "error: pandoc not found"; exit 1; }
-ENGINE=""
-for e in xelatex pdflatex tectonic; do
-  command -v "$e" >/dev/null 2>&1 && ENGINE="$e" && break
-done
-[ -n "$ENGINE" ] || { echo "error: no LaTeX engine (xelatex/pdflatex/tectonic)"; exit 1; }
+command -v uv >/dev/null || { echo "error: uv not found"; exit 1; }
 
-# Strip the decorative emoji and map a few Unicode glyphs the default
-# LaTeX fonts lack to ASCII, so the build is clean and CI-portable.
-# (The markdown source keeps the nicer glyphs for terminal/GitHub.)
+SOLX_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/solx/Cargo.toml" | head -n 1)"
+[ -n "$SOLX_VERSION" ] || { echo "error: could not read solx version"; exit 1; }
+
+# Keep GitHub/terminal affordances in the single Markdown source while giving
+# the PDF a compact title banner and no source/build note. Map the remaining
+# decorative Unicode to ASCII so the PDF renderer stays font-portable.
 TMP="$(mktemp --suffix=.md)"
 trap 'rm -f "$TMP"' EXIT
-sed -e 's/🌵 *//g' \
+sed -e '1d' \
+    -e '/^> A rendered PDF lives at/d' \
+    -e '/^> (build it with /d' \
+    -e '/^> to print this page/d' \
+    -e '/^---$/d' \
+    -e 's/🌵 *//g' \
     -e 's/≤/<=/g' -e 's/≥/>=/g' \
     -e 's/↔/<->/g' -e 's/→/->/g' \
     "$SRC" > "$TMP"
 
-pandoc "$TMP" -o "$OUT" \
-  --pdf-engine="$ENGINE" \
-  -V geometry:margin=0.6in -V fontsize=10pt -V colorlinks=true \
-  --metadata title="Sol Cheatsheet"
+UV_CACHE_DIR="${UV_CACHE_DIR:-/scratch/$USER/.cache/uv}" \
+  uv run --script "$ROOT/scripts/render-cheatsheet.py" \
+  "$TMP" "$OUT" --version "$SOLX_VERSION"
 
-echo "wrote $OUT ($(du -h "$OUT" | cut -f1), engine: $ENGINE)"
+echo "wrote $OUT ($(du -h "$OUT" | cut -f1), renderer: ReportLab)"
