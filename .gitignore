@@ -12,6 +12,9 @@ __pycache__/
 .claude/
 .claude/worktrees/
 
+# Local PR workflow scratch space (devflow)
+docs/PR/
+
 # Eval harness - private maintainer state (see DEVELOPMENT.md)
 evals/evals.json
 evals/results/
