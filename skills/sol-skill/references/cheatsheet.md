@@ -9,7 +9,7 @@ safe automation, storage, and compute-node access.
 
 ---
 
-## Know your access first
+## Access
 
 Your account decides which partitions and QOS you may use. Check it before
 choosing a route:
@@ -21,7 +21,7 @@ myfairshare    # read RealFairShare; a very low score means longer queue waits
 
 ---
 
-## Pick a partition by wall-time, not by GPU use
+## Partitions and QOS
 
 GPUs live in `htc`, `public`, `general`, `lightwork`, and `arm`. The deciding
 questions are how long the job runs, whether it may be preempted, and which
@@ -52,7 +52,7 @@ accelerator it needs.
 
 ---
 
-## Everyday `solx` workflow
+## `solx` workflow
 
 ```shell
 solx init                    # create ~/.config/solx/config.toml
@@ -68,7 +68,7 @@ solx job stop                # cancel when done; prompts before acting
 `job` also accepts `jobs`; `job list` accepts `ls`; and `solx jump` is an alias
 for `solx job jump`.
 
-## Complete `solx` command map
+## `solx` commands
 
 | **Command** | **Purpose / important options** |
 | --- | --- |
@@ -84,7 +84,7 @@ for `solx job jump`.
 | `solx cheatsheet` | Print this quick reference as text. |
 | `solx version` / `help` | Aliases of `--version` / `--help`. |
 
-## Output, targeting, and safety rules
+## Output and safety
 
 | **Situation** | **Rule** |
 | --- | --- |
@@ -104,7 +104,7 @@ solx job stop 12345 -n                            # preview, never cancel
 
 ---
 
-## `solx keep` - bounded scratch renewal
+## `solx keep`
 
 Only warning-CSV paths matched by `[keep]` are walked. Writable files and
 directories, including flagged roots and collaborator-owned entries, are
@@ -152,7 +152,7 @@ Minimal `#SBATCH` header (time format is `D-HH:MM:SS`):
 > template fits. Use `solx job start` for interactive work and `sbatch` for
 > unattended batch work.
 
-## `solx` and raw Slurm equivalents
+## `solx` and Slurm
 
 | **`solx`** | **Raw Slurm** |
 | --- | --- |
@@ -164,7 +164,7 @@ Minimal `#SBATCH` header (time format is `D-HH:MM:SS`):
 
 ---
 
-## Job stuck PENDING? Diagnose before rerouting
+## Pending jobs
 
 ```shell
 squeue --me -t PD -O "JobID,Reason:50,StartTime"   # reason and estimated start
@@ -183,7 +183,7 @@ instead of canceling and resubmitting.
 
 ---
 
-## Human wrappers and agent-parseable commands
+## Status commands
 
 | **You want** | **Human command** | **Parse this** |
 | --- | --- | --- |
@@ -200,7 +200,7 @@ Slurm fields or `solx --json`; free GPUs equal `Gres` minus `GresUsed`.
 
 ---
 
-## Reach a compute-node service from your laptop
+## Remote services
 
 ```shell
 # On a Sol login node: register a VS Code tunnel on lightwork.
@@ -213,7 +213,7 @@ ssh -N -L 8888:localhost:8888 -J $USER@login.sol.rc.asu.edu $USER@$NODE
 Get `$NODE` from the `NODELIST` column in `squeue --me`. Bind services to
 `localhost`, never `0.0.0.0`, on shared nodes.
 
-## Storage and heavy I/O
+## Storage and I/O
 
 | **Path** | **Use** | **Policy** |
 | --- | --- | --- |
@@ -230,7 +230,7 @@ compute node or batch job for compute. Keep heavy work off login nodes.
 
 ---
 
-## Five rules to remember
+## Safe defaults
 
 | **Rule** | **Default** |
 | --- | --- |

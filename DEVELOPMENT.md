@@ -5,7 +5,7 @@ This doc is for contributors and the maintainer. End-user docs live in
 content). Public-facing test methodology lives in
 [`docs/coverage.md`](docs/coverage.md).
 
-## Repo shape
+## Repository layout
 
 ```text
 solx/                               # the repo
@@ -36,12 +36,12 @@ The live skill-creator workspace (`sol-skill-workspace/`, sibling to the
 skill folder) is also gitignored - it holds transcripts, raw outputs,
 and per-run benchmark files that don't belong in version control.
 
-## Skill design guidelines
+## Skill design
 
 These are load-bearing for the skill's quality. Apply them when
 adding or revising any section.
 
-### Situation first, technique second
+### Situational guidance
 
 This skill is not an "SSH skill", not a "Slurm skill", not a "Python
 skill". It is a **situational guide**: the user is trying to get
@@ -65,7 +65,7 @@ rewrite it. The agent already knows generic techniques from training
 data; what it doesn't know is which one Sol's setup makes
 appropriate, and why.
 
-### Decisions in `SKILL.md`, detail in `references/`
+### Content placement
 
 **Load-bearing decision rules belong in `SKILL.md` itself.** Anything
 the agent needs to make a *correct decision* - partition choice,
@@ -96,7 +96,7 @@ When in doubt, ask: "if the agent never reads this reference, would
 its answer still be correct on this topic?" If no, the rule
 belongs up in `SKILL.md`.
 
-## Layered eval harness
+## Evaluation layers
 
 `sol-skill` is mostly **decision** and **refusal** logic that only
 matters on Sol: "use `$(whoami)`, not `<asurite>`", "don't `find
@@ -121,7 +121,7 @@ tagged `layer: L1 | L2 | L3` so the runner picks the right execution
 mode and the public coverage doc can show pass-rate per layer
 separately, not just an overall number.
 
-## The mock environment (`evals/mocks/`)
+## Mock environment
 
 The thing that makes L2 work. Plain shell + tiny Python - no
 framework. The mocks are small enough to read in a sitting; if you
@@ -153,7 +153,7 @@ intentionally **absent** from `bin/` - that's how we exercise the
 "command -v solx returns nothing" branch. Drop a `solx` shim into
 `bin/` only when testing the `solx`-present branch.
 
-### Quick start
+### Mock setup
 
 ```shell
 cd /path/to/sol-skill
@@ -163,12 +163,12 @@ solx keep --dry-run -v                       # exercises CSV + keep-list parsing
 cat "$MOCK_LOG"                              # see what was invoked
 ```
 
-## How to run an eval locally
+## Local evaluation
 
 Prereqs: `uv`, `claude` CLI, the `skill-creator` skill installed (the
 harness shells out to its `scripts/` and `eval-viewer/`).
 
-### Baseline isolation (important)
+### Baseline isolation
 
 Skill-creator compares **with-skill** runs against **baseline** runs.
 If `sol-skill` is installed at user scope (`~/.claude/skills/sol-skill/`),
@@ -208,7 +208,7 @@ To hide a different skill (e.g., when iterating on a sibling skill):
 To verify the sandbox is taking effect, start a `claude -p` against
 it and ask "list available skills" - `sol-skill` should be missing.
 
-### Run the eval suite
+### Eval suite
 
 ```shell
 # 1. Build the sandbox (first time, or whenever ~/.claude changes)
@@ -236,7 +236,7 @@ python <skill-creator-path>/eval-viewer/generate_review.py \
   --benchmark "$WORKSPACE/benchmark.json"
 ```
 
-## How to add a new eval
+## New evals
 
 1. Open `evals/evals.json` (or `evals/evals.example.json` if you don't
    have a private set yet).
@@ -257,7 +257,7 @@ python <skill-creator-path>/eval-viewer/generate_review.py \
 Keep prompts concrete and realistic - see the skill-creator
 description-optimization guide for what makes a good prompt.
 
-## Release process tie-in
+## Releases
 
 The CLI and the skill share one version line; a pushed `vX.Y.Z` tag
 triggers `.github/workflows/release.yml` (build the static musl binary,
@@ -293,7 +293,7 @@ gate for such a release is the crate's own `cargo test` suite plus an L3
 release that touches skill prose, references, or decision rules must run
 the skill evals. (1.0.2 - the nested `job jump` fix - was CLI-only.)
 
-## What's in the repo vs. not
+## Repository contents
 
 | Thing | Location | In git? | Why |
 |---|---|---|---|

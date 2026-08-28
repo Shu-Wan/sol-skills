@@ -23,7 +23,7 @@ mod tests {
     #[test]
     fn cheatsheet_has_the_key_sections() {
         for needle in [
-            "Know your access",
+            "## Access",
             "Partition",
             "QOS",
             "debug",

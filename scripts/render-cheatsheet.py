@@ -411,31 +411,29 @@ def require_section(sections: list[Section], title: str) -> Section:
 
 def make_story(sections: list[Section]) -> list[Flowable]:
     story: list[Flowable] = []
-    # Keep the second page balanced: the compact rules card closes the left
-    # column, while diagnosis starts the right-hand troubleshooting column.
-    remember = require_section(sections, "Five rules to remember")
-    sections = [section for section in sections if section is not remember]
-    diagnose = require_section(
-        sections, "Job stuck PENDING? Diagnose before rerouting"
-    )
+    # Keep the second page balanced: safe defaults close the left column,
+    # while pending-job diagnosis starts the right column.
+    defaults = require_section(sections, "Safe defaults")
+    sections = [section for section in sections if section is not defaults]
+    diagnose = require_section(sections, "Pending jobs")
     diagnose_index = sections.index(diagnose)
-    sections.insert(diagnose_index, remember)
+    sections.insert(diagnose_index, defaults)
     section_design = {
-        "Know your access first": ("Access", "maroon"),
-        "Everyday solx workflow": ("Workflow", "maroon"),
-        "Complete solx command map": ("Commands", "maroon"),
-        "Output, targeting, and safety rules": ("Safety", "gold"),
-        "solx keep - bounded scratch renewal": ("Scratch", "maroon"),
+        "Access": ("Account", "maroon"),
+        "solx workflow": ("CLI", "maroon"),
+        "solx commands": ("CLI", "maroon"),
+        "Output and safety": ("CLI", "gold"),
+        "solx keep": ("Scratch", "maroon"),
         "Slurm basics": ("Batch", "maroon"),
-        "solx and raw Slurm equivalents": ("Translate", "black"),
-        "Job stuck PENDING? Diagnose before rerouting": ("Diagnose", "gold"),
-        "Human wrappers and agent-parseable commands": ("Automation", "maroon"),
-        "Reach a compute-node service from your laptop": ("Connect", "black"),
-        "Storage and heavy I/O": ("Storage", "maroon"),
-        "Five rules to remember": ("Remember", "gold"),
+        "solx and Slurm": ("Translate", "black"),
+        "Pending jobs": ("Diagnose", "gold"),
+        "Status commands": ("Automation", "maroon"),
+        "Remote services": ("Connect", "black"),
+        "Storage and I/O": ("Files", "maroon"),
+        "Safe defaults": ("Checklist", "gold"),
     }
     for section in sections:
-        if section.title == "Pick a partition by wall-time, not by GPU use":
+        if section.title == "Partitions and QOS":
             paragraphs = [
                 block for block in section.blocks if block.kind == "paragraph"
             ]
@@ -457,7 +455,7 @@ def make_story(sections: list[Section]) -> list[Flowable]:
                 f'cheatsheet section has no card design: "{plain_title}"'
             )
         category, tone = design
-        compact = plain_title == "solx keep - bounded scratch renewal"
+        compact = plain_title == "solx keep"
         story.append(card(category, section.title, section.blocks, tone, compact))
     return story
 
