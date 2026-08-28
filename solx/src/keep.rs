@@ -153,26 +153,22 @@ pub fn build_plan(csv_dir: &Path, stages: &[String], keep: &KeepRules) -> Result
 // touch is the expensive half (one metadata write per entry), so it is
 // sharded into batches and spread across the pool.
 
-/// One kept directory's entries, as `enumerate_dir` found them.
+/// Entries found during one directory walk.
 #[derive(Debug, Default)]
 pub struct Walk {
     /// Regular files under the directory (`find DIR -type f`).
     pub files: Vec<PathBuf>,
     /// The directory itself plus every subdirectory (`find DIR -type d`).
     pub dirs: Vec<PathBuf>,
-    /// `ok`, a `skipped: ...` note, or the walk error.
+    /// `ok`, a skip note, or the last walk error.
     pub msg: String,
 }
 
-/// List every regular file and directory under `directory` in one walk.
+/// List regular files and directories under `directory`.
 ///
-/// Matches `find DIR -type f` plus `find DIR -type d`: hidden entries
-/// included, no ignore files honored, symlinks neither touched nor followed.
-/// `dirs` includes the directory itself - touching a file doesn't move its
-/// parent's mtime, so a directory's own stamp has to be set directly; the
-/// order entries come back in is the walker's and nothing depends on it. A
-/// path that isn't a directory (flagged then removed) is a benign skip, not
-/// an error.
+/// Includes hidden and ignored entries, but not symlinks. `dirs` includes the
+/// root. Missing directories are skipped. On error, returns the entries found
+/// with the last error.
 pub fn enumerate_dir(directory: &str) -> Walk {
     if !Path::new(directory).is_dir() {
         return Walk {
@@ -203,10 +199,7 @@ pub fn enumerate_dir(directory: &str) -> Walk {
         }
     }
     if let Some(msg) = walk_error {
-        return Walk {
-            msg,
-            ..Walk::default()
-        };
+        return Walk { files, dirs, msg };
     }
     Walk {
         files,
@@ -644,7 +637,12 @@ fn worker(state: &Mutex<PoolState>, ready: &Condvar, out: &Out) {
             Task::Enumerate(d) => {
                 let walk = enumerate_dir(&d);
                 let mut s = state.lock().expect("pool lock");
-                if walk.msg == "ok" {
+                let skipped = walk.msg.starts_with("skipped");
+                if walk.msg != "ok" && !skipped {
+                    s.renewal.failures += 1;
+                    out.error(&format!("FAIL enumerate {d} :: {}", walk.msg));
+                }
+                if !skipped {
                     for batch in shard(walk.files, BATCH) {
                         s.queue
                             .push_back(Task::Touch(d.clone(), batch, Kind::Files));
@@ -652,9 +650,6 @@ fn worker(state: &Mutex<PoolState>, ready: &Condvar, out: &Out) {
                     for batch in shard(walk.dirs, BATCH) {
                         s.queue.push_back(Task::Touch(d.clone(), batch, Kind::Dirs));
                     }
-                } else if !walk.msg.starts_with("skipped") {
-                    s.renewal.failures += 1;
-                    out.error(&format!("FAIL enumerate {d} :: {}", walk.msg));
                 }
                 s.in_flight -= 1;
                 ready.notify_all();
@@ -681,14 +676,14 @@ fn execute_serial(plan: &Plan, out: &Out) -> Renewal {
     let mut renewal = Renewal::default();
     for (_, d) in &plan.kept {
         let walk = enumerate_dir(d);
-        if walk.msg != "ok" {
-            if !walk.msg.starts_with("skipped") {
-                renewal.failures += 1;
-                out.error(&format!("FAIL enumerate {d} :: {}", walk.msg));
-            }
+        if walk.msg.starts_with("skipped") {
             continue;
         }
         let mut one = Renewal::default();
+        if walk.msg != "ok" {
+            one.failures += 1;
+            out.error(&format!("FAIL enumerate {d} :: {}", walk.msg));
+        }
         for (batch, kind) in shard(walk.files, BATCH)
             .into_iter()
             .map(|b| (b, Kind::Files))
@@ -1083,6 +1078,44 @@ mod tests {
                 failures: 0
             }
         );
+    }
+
+    #[test]
+    fn execute_renews_accessible_entries_after_partial_walk() {
+        use std::os::unix::fs::PermissionsExt;
+
+        for jobs_n in [1, 4] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join(format!("proj-{jobs_n}"));
+            let accessible = root.join("accessible.txt");
+            let locked = root.join("locked");
+            fs::create_dir_all(&locked).unwrap();
+            fs::write(&accessible, "x").unwrap();
+            fs::write(locked.join("inaccessible.txt"), "x").unwrap();
+            backdate(&root);
+            backdate(&accessible);
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+
+            let plan = Plan {
+                kept: vec![("pending".to_string(), root.display().to_string())],
+                skipped: vec![],
+            };
+            let out = Out {
+                json_mode: true,
+                interactive: false,
+            };
+            let renewal = execute(&plan, jobs_n, &out);
+
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+            assert_eq!(renewal.failures, 1);
+            assert!(renewal.files > 0, "jobs={jobs_n}: {renewal:?}");
+            assert!(renewal.dirs > 0, "jobs={jobs_n}: {renewal:?}");
+            assert!(is_fresh(&root), "jobs={jobs_n}: root was not renewed");
+            assert!(
+                is_fresh(&accessible),
+                "jobs={jobs_n}: accessible file was not renewed"
+            );
+        }
     }
 
     #[test]
