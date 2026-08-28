@@ -9,17 +9,19 @@ hand before each release.
 **Last verified:** the `solx` CLI is covered by its own crate suite
 (`cargo test` in `solx/`: unit tests per module plus the end-to-end
 `tests/cli.rs`, including a real-touch renewal test), which runs in CI.
-**1.0.2** (2026-07-16) and **1.0.3** (2026-08-21) were CLI-only releases -
-skill guidance unchanged - so per [`../DEVELOPMENT.md`](../DEVELOPMENT.md)
-each was gated by that crate suite plus an L3 CLI smoke on real Sol, not a
-skill-eval re-run. For 1.0.2 that smoke was the nested `job jump` fix; for
-1.0.3 it was the CI-built musl binary run against a BeeGFS `/scratch` sample
-of 50 flagged directories holding 150 entries owned by another user (100
-files + 50 directories, all stale beforehand). 1.0.2 emitted 50 FAIL lines,
-reported `files_touched: 100` with `failures: 50`, and left all 150 entries
-stale; 1.0.3 renewed all 150, reported `failures: 0`, and left none stale.
-The skill-level L1/L2/L3 evals for the `solx`-driven flows are **pending
-re-run on Sol** and are marked 🟡 below.
+**1.0.2** (2026-07-16) was CLI-only and was gated by that suite plus a real-Sol
+smoke of the nested `job jump` fix. **1.0.3** (2026-08-28) also includes the
+skill's synchronized cheatsheet reference. Its CLI fix was tested with the
+CI-built musl binary on a BeeGFS `/scratch` sample of 50 flagged directories
+holding 150 collaborator-owned entries (100 files + 50 directories, all stale
+beforehand): 1.0.2 emitted 50 FAIL lines, reported `files_touched: 100` with
+`failures: 50`, and left all 150 stale; 1.0.3 renewed all 150, reported
+`failures: 0`, and left none stale. The cheatsheet build is checked for
+deterministic output, source/CLI synchronization, valid PDF structure, and
+visual layout. Current partition/QOS routes were checked against the live Sol
+scheduler. The private skill-level L1/L2 eval inputs are unavailable in this
+checkout, so those flows remain **pending re-run on Sol** and are marked 🟡
+below.
 
 ## Status legend
 
@@ -107,7 +109,7 @@ to the skill should mean adding a row here in the same group.
 | Picks `interactive` wrapper for interactive shells over raw `salloc` | 🟢 tested | Verified iter-4 eval B |
 | Knows `interactive` defaults to `-p htc -q public -c 1 -t 0-4` (bare invocation works) | 🟡 documented | Added after reading `/usr/local/bin/interactive` source |
 | Routes work by wall-time, not CPU-vs-GPU: ≤4h (incl. GPU) -> `htc`; resists the "GPU -> public" reflex | 🟢 tested | Partition eval: fixed skill 14/14 vs pre-fix 10/14 (evals #4/#8/#9/#10) |
-| Knows the QOS layer: `debug` (≤15m, high-pri, public/general only - rejected on `htc`), `private` (preemptible, >4h) | 🟢 tested | Eval #10; `-p htc -q debug` rejected by live `sbatch --test-only` |
+| Knows the QOS layer: `debug` (≤15m, high-pri, prefer `htc`; also valid on `public`/`general`), `private` (preemptible, >4h) | 🟢 tested | Live `sbatch --test-only` accepted `htc`, `public`, and `general` with `debug` on 2026-08-28 |
 | L3 grader: agent's recommended `#SBATCH` header is validated against the live scheduler (`sbatch --test-only`) | 🟢 tested | `l3_sbatch_test_only` check on evals #4/#8/#9/#10 |
 | Recommends `/packages/public/sol-sbatch-templates/` over writing SBATCH from scratch | 🟡 documented | Iter-5 P5: agent acknowledged templates exist but didn't name the specific subdir; skill gap to sharpen |
 | SBATCH header generation (partition, QOS, time, GPU) | 🟢 tested | Verified iter-5 P5: complete OpenMPI script with correct partition/QOS, `srun --mpi=pmix`, `--export=NONE`, `/scratch` logs |

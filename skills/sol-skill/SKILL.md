@@ -257,12 +257,11 @@ long* and *how urgently* do:
   ≤4h job submitted to `public` prints `you may consider '-p htc'`, but
   it doesn't move the job for you, so pass `-p htc` yourself. A 30-minute
   A100 ablation is an `htc` job, not a `public` one.
-- **≤ 15 min and you want to jump the queue -> `-p public -q debug`**
-  (or `-p general -q debug`). The `debug` QOS has a 15-minute hard cap
-  but very high priority and allows GPUs - ideal for "does this even
-  launch?". It is **not** valid on `htc` (`-p htc -q debug` is rejected),
-  so pair it with `public`/`general` - and always *with* `-q debug`, since
-  bare `-p general` (default QOS `public`) is rejected too. One job at a time.
+- **≤ 15 min and you want to jump the queue -> `-p htc -q debug`.**
+  The `debug` QOS has a 15-minute hard cap but very high priority and allows
+  GPUs - ideal for "does this even launch?". It also works with `public` and
+  `general`, but `htc` is the default route for a short test. One job may run
+  at a time, with at most two submitted.
 - **> 4 h, non-preemptable -> `-p public`** (7-day wall) - real runs
   that can't finish or checkpoint inside 4 hours.
 - **> 4 h on borrowed private nodes, OK with preemption -> `-p general

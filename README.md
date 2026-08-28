@@ -68,7 +68,7 @@ reference notes on Sol conventions -
 [ssh tunnels](skills/sol-skill/references/sessions.md),
 [file sharing](skills/sol-skill/references/sharing.md) - live with the skill.
 
-## 🌵 The companion skill
+## Sol skill
 
 [`skills/sol-skill/`](skills/sol-skill/SKILL.md) teaches an AI coding assistant
 to operate on Sol the careful way. It turns natural requests like "start a GPU

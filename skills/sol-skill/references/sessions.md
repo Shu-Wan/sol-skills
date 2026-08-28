@@ -81,9 +81,8 @@ If the user describes the work as "quick", "debug", "lightweight",
 "just need to check", or names a wall-time at or under 4 hours - that's
 an `htc` request, GPU or not. Don't default to `public` in those cases;
 only a need for more than 4 hours (or a node shape htc lacks) does. For
-a ≤15-minute test that needs to start *now*, the `debug` QOS (`-p public
--q debug`, very high priority, GPUs allowed - but not valid on `htc`) is
-the fast lane.
+a ≤15-minute test that needs to start *now*, use the `debug` QOS with
+`-p htc -q debug`; it has very high priority and allows GPUs.
 
 When the allocation lands, the prompt changes and you are now on a
 compute node. **Capture the node hostname** - you will need it from

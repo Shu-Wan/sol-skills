@@ -1,179 +1,241 @@
 # 🌵 Sol Cheatsheet
 
-Quick reference for ASU's Sol supercomputer - SLURM basics, the `solx`
-CLI and its raw-SLURM equivalents, partitions & QOS, Sol's own wrappers,
-and getting at a compute-node service from your laptop.
+Quick reference for ASU's Sol supercomputer - the `solx` CLI, Slurm job routing,
+safe automation, storage, and compute-node access.
 
 > A rendered PDF lives at [`docs/cheatsheet.pdf`](../../../docs/cheatsheet.pdf)
-> (build it with `scripts/build-cheatsheet.sh`). In a terminal on Sol, run
-> `solx cheatsheet` to print this page.
+> (build it with `scripts/build-cheatsheet.sh`). On Sol, run `solx cheatsheet`
+> to print this page in a terminal.
 
 ---
 
-## Know your access first
+## Access
 
-What partitions, QOS, and group account *you* can use - the answer
-drives every job decision below:
+Your account decides which partitions and QOS you may use. Check it before
+choosing a route:
 
 ```shell
 sacctmgr -n show assoc user=$USER format=Account,Partition,QOS
-#   -> e.g.  grp_yourpi || debug,htc,private,public
-myfairshare                    # dampened RealFairShare (lower = back off / use a buy-in QOS); raw `sshare -U` is undampened
+myfairshare    # read RealFairShare; a very low score means longer queue waits
 ```
 
 ---
 
-## Partitions - pick by wall-time, not by "is it a GPU job?"
+## Partitions and QOS
 
-GPUs live in `htc`, `public`, **and** `general`. The deciding question is
-*how long* and *how urgently*, not CPU-vs-GPU.
+GPUs live in `htc`, `public`, `general`, `lightwork`, and `arm`. The deciding
+questions are how long the job runs, whether it may be preempted, and which
+accelerator it needs.
 
-| Partition   | Wall limit | GPUs                                   | Use it for |
-|-------------|-----------:|----------------------------------------|------------|
-| `htc`       | **4 h**    | large A100 pool + H100/L40/A30/H200    | the default for anything ≤4 h, **GPU included** - least contended |
-| `public`    | 7 days     | A100 (+ A100-MIG, A30)                 | runs that need >4 h, non-preemptable |
-| `general`   | 14 days    | A100/H100/H200/L40                     | privately-owned nodes (via `-q private` or your `grp_*`) |
-| `lightwork` | 1 day      | a100.20gb                              | the `vscode` tunnel's home; light dev |
-| `highmem`   | 7 days     | -                                      | up to 2 TB RAM |
+| **Partition** | **Wall limit** | **Hardware / best use** |
+| --- | ---: | --- |
+| `htc` | **4 h** | Default for short CPU and GPU work; large accelerator pool. |
+| `public` | 7 days | Non-preemptable CPU/GPU jobs that need more than 4 h. |
+| `general` | 14 days | Privately-owned CPU/GPU nodes via `private` or `grp_*` QOS. |
+| `lightwork` | 1 day | Light development, compilation, bulk I/O, and `vscode`; max 8 cores. |
+| `highmem` | 7 days | Memory-heavy CPU work, up to 2 TB; normal `public` use may have a lower cap. |
+| `arm` | 7 days | ARM/aarch64 nodes with Grace Hopper (`gh200`) GPUs. |
+| `fpga` | 7 days | FPGA, Vector Engine, and special accelerator workloads. |
 
-## QOS - priority & preemption, and which partitions accept it
+| **QOS** | **Wall cap** | **Use it for** |
+| --- | ---: | --- |
+| `public` | Partition limit | Default, non-preemptable access to public resources. |
+| `debug` | **15 min** | High-priority smoke tests; one running job and two submitted jobs per user. |
+| `private` | Partition limit | Preemptible access to idle buy-in nodes; owners may cancel the job. |
+| `grp_*` | Site/group limit | Your group's owned nodes, when your account provides the QOS. |
+| `long` | 14 days | Approved long batch jobs on `public` or `highmem`; not for interactive jobs. |
+| `class` | 1 day | Course accounts; per-user CPU, memory, GPU, and job-count caps. |
 
-| QOS       | Wall cap        | Notes |
-|-----------|-----------------|-------|
-| `public`  | (partition's)   | default, non-preemptable |
-| `debug`   | **15 min**      | very high priority; GPUs OK; **`public`/`general` only - rejected on `htc`**; one job at a time |
-| `private` | (partition's)   | preemptible access to buy-in nodes - owners can cancel you; runs past htc's 4 h |
-| `grp_*`   | up to 30 days   | your group's owned nodes (if you're in one) |
-| `class`   | 1 day           | course users; GPU-minute caps |
-
-**Routing in one line:** ≤4 h (incl. GPU) -> `htc` · ≤15 min & urgent ->
-`-p public -q debug` · >4 h -> `-p public` · >4 h preemptible -> `-p general
--q private`. Never `-p htc -q debug` (invalid).
+> **Routing:** up to 4 h -> `htc`; up to 15 min and urgent -> `-p htc -q debug`;
+> more than 4 h -> `public`; more than 4 h and preemption is acceptable ->
+> `-p general -q private`. Validate unusual combinations with `sbatch --test-only`.
 
 ---
 
-## SLURM basics
+## `solx` workflow
+
+```shell
+solx init                    # create ~/.config/solx/config.toml
+solx config edit             # define job templates and [keep] paths
+solx job start debug -n      # preview the salloc command
+solx job start debug         # allocate; waits for the grant and prints the job ID
+solx job jump                # open a shell on the compute node
+solx job time                # show remaining wall-time
+exit                         # leave the shell; the allocation keeps running
+solx job stop                # cancel when done; prompts before acting
+```
+
+`job` also accepts `jobs`; `job list` accepts `ls`; and `solx jump` is an alias
+for `solx job jump`.
+
+## `solx` commands
+
+| **Command** | **Purpose / important options** |
+| --- | --- |
+| `solx init [-f]` | Write starter config; `-f` / `-y` overwrites. |
+| `solx job list` | List your jobs (`squeue --me`). |
+| `solx job start [TEMPLATE]` | Start an interactive allocation; `-n`, `--timeout`, and `--` passthrough. |
+| `solx job jump [JOBID]` | Attach with `srun --pty`; `-q` hides nesting/selection notes. |
+| `solx job time [JOBID]` | Print remaining time in `D-HH:MM:SS`. |
+| `solx job stop [JOBID]` | Cancel a job; `-n` previews and `-y` skips confirmation. |
+| `solx keep` | Renew flagged scratch files and directories selected by `[keep]`; see below. |
+| `solx config show` / `edit` | Inspect resolved config or open it in `$EDITOR`. |
+| `solx completions bash\|zsh\|fish` | Emit a static shell-completion script. |
+| `solx cheatsheet` | Print this quick reference as text. |
+| `solx version` / `help` | Aliases of `--version` / `--help`. |
+
+## Output and safety
+
+| **Situation** | **Rule** |
+| --- | --- |
+| Human terminal | Data commands print aligned text. |
+| Pipe or agent | Output auto-switches to JSON; `--json` forces it. Put `--json` before `job start`. |
+| Destructive command | `job stop` and `keep` show a plan and prompt; `-n` previews, `-y` confirms. |
+| Non-interactive session | A command that needs confirmation refuses instead of hanging. |
+| Missing job ID | Inside an allocation, use `$SLURM_JOB_ID`; on login, `time` / `jump` pick the most recent job. |
+| Multiple jobs on login | `stop` refuses to guess; pass the job ID. |
+| Jump from another job | `solx job jump <JOBID>` safely targets that allocation and warns about nesting; use `-q` to silence the note. |
+
+```shell
+solx --json job list | jq '.[].job_id'
+solx job start gpu --timeout 20m -- --mem=128G    # last salloc flag wins
+solx job stop 12345 -n                            # preview, never cancel
+```
+
+---
+
+## `solx keep`
+
+Only warning-CSV paths matched by `[keep]` are walked. Writable files and
+directories, including flagged roots and collaborator-owned entries, are
+renewed; symlinks are skipped and `/scratch` is never scanned blindly.
+
+```shell
+solx keep --dry-run -v       # inspect the full plan first
+solx keep                    # execute with a confirmation prompt
+solx --json keep -n          # machine-readable plan and capped path sample
+solx --json keep -y          # execute; exact renewal and failure counts
+```
+
+Controls: `--stage all|inactive|over90|pending`, `--csv-dir DIR`, `-j N`, `-v`,
+`-n`, and `-y`. JSON reports `files_touched`, `dirs_touched`, and `failures`
+(`dirs` means matched roots); any failure exits 1. Run large renewals on the
+DTN, a compute node, or a short batch job - not on a throttled login node.
+
+---
+
+## Slurm basics
 
 ```shell
 sbatch job.sh                  # submit a batch script
-squeue --me                    # your jobs        (alias: myjobs; bare `sq` = whole cluster)
+squeue --me                    # your jobs (human alias: myjobs)
 scancel <jobid>                # cancel
-scontrol show job <jobid>      # full detail / why pending
-sbatch --test-only job.sh      # validate partition/QOS/time/gres WITHOUT submitting
-interactive                    # quick shell; defaults to -p htc -q public -c 1 -t 0-4
+scontrol show job <jobid>      # full detail
+sbatch --test-only job.sh      # validate without submitting
+interactive                    # quick shell; defaults to htc/public, 1 core, 4 h
 ```
 
-`#SBATCH` header skeleton (time format is `D-HH:MM:SS`):
+Minimal `#SBATCH` header (time format is `D-HH:MM:SS`):
 
 ```bash
 #!/bin/bash
-#SBATCH -p htc                 # partition  (htc = ≤4h, has GPUs)
-#SBATCH -q public              # QOS
-#SBATCH -t 0-04:00:00          # wall-time
-#SBATCH -c 8                   # cores
-#SBATCH --gres=gpu:a100:1      # GPU(s)
+#SBATCH -p htc
+#SBATCH -q public
+#SBATCH -t 0-04:00:00
+#SBATCH -c 8
+#SBATCH --gres=gpu:a100:1
 #SBATCH --mem=64G
 #SBATCH -o slurm.%j.out
 ```
 
-> Start from Sol's templates, don't hand-roll headers:
-> `/packages/public/sol-sbatch-templates/templates/`.
+> Start from `/packages/public/sol-sbatch-templates/templates/` when a supplied
+> template fits. Use `solx job start` for interactive work and `sbatch` for
+> unattended batch work.
+
+## `solx` and Slurm
+
+| **`solx`** | **Raw Slurm** |
+| --- | --- |
+| `solx job start [TEMPLATE]` | `salloc` / `interactive` with template flags. |
+| `solx job jump [JOBID]` | `srun --jobid=ID --overlap --pty $SHELL`. |
+| `solx job list` | `squeue --me`. |
+| `solx job time [JOBID]` | `squeue -h -j ID -o %L`. |
+| `solx job stop -y ID` | `scancel ID`. |
 
 ---
 
-## Job stuck PENDING? Diagnose, don't spray
+## Pending jobs
 
 ```shell
-squeue --me -t PD -O "JobID,Reason:50,StartTime"   # full reason + ETA (widen Reason; don't grep '[^ ]+')
+squeue --me -t PD -O "JobID,Reason:50,StartTime"   # reason and estimated start
 scontrol show job <id>                             # all fields for one job
 ```
 
-| `Reason` | Move |
-|----------|------|
-| `Priority` (low fairshare) | priority-bound - report the ETA, **don't** resubmit |
-| `ReqNodeNotAvail` | node unavailable (drained/down or reserved) - check the node; reroute to healthy nodes |
-| `Resources` | capacity-bound - *now* a reroute / right-size can help |
+| **Reason** | **Response** |
+| --- | --- |
+| `Priority` with low fairshare | Report the ETA and wait; resubmitting does not improve priority. |
+| `ReqNodeNotAvail` | Check whether the requested node is reserved, drained, or down. |
+| `Resources` | Right-size or reroute if another eligible partition starts sooner. |
 
-A reroute beats only `Resources`. For `Priority` / reservations every
-partition converges on the same start - diagnose + report, then stop
-submitting (resubmitting just spends more fairshare). When a reroute
-*is* right, modify in place: `scontrol update job <id> Partition=... QOS=...`
-(not `scancel` + `sbatch`, which resets accrued priority).
+Only capacity-bound jobs benefit from rerouting. If a reroute helps, preserve
+the accrued queue priority with `scontrol update job <id> Partition=... QOS=...`
+instead of canceling and resubmitting.
 
 ---
 
-## `solx` ↔ raw SLURM
+## Status commands
 
-`solx` owns the interactive-allocation lifecycle; raw SLURM is the
-equivalent fallback for one-off reads.
+| **You want** | **Human command** | **Parse this** |
+| --- | --- | --- |
+| Fairshare / priority | `myfairshare` | `myfairshare` -> `RealFairShare`. |
+| Scratch quota | - | `beegfs-ctl --getquota --uid $USER`. |
+| Current jobs | `myjobs` | `squeue --me -O JobID,State,Reason`. |
+| Pending start estimate | `thisjob ID` | `scontrol show job ID` -> `StartTime=`. |
+| Finished-job efficiency | `seff ID` | `seff ID`. |
+| Partition capacity | `showparts` | `sinfo -h -o "%P %a %l %D %t"`. |
+| Free GPUs | `showgpus` | `sinfo -h -O "Partition,StateLong,Gres,GresUsed"`. |
 
-| `solx`                       | raw SLURM equivalent |
-|------------------------------|----------------------|
-| `solx job start [TEMPLATE]`  | `salloc` / `interactive` from a config template, *waits for the grant* |
-| `solx job jump`              | `srun --pty $SHELL` onto the compute node |
-| `solx job list`              | `squeue --me` |
-| `solx job time`              | `squeue -h -j "$SLURM_JOB_ID" -o %L` |
-| `solx job stop`              | `scancel <jobid>` |
-| `solx keep`                  | renew the mtime on `/scratch` files Sol flagged (filtered by `[keep]`) |
-| `solx job start gpu -- ...`    | anything after `--` is appended to `salloc` (last flag wins) |
-
-Config lives at `~/.config/solx/config.toml` (`solx config edit`). Add
-`--json` for machine output; `-n` to preview; `-y` to skip prompts.
+`my*` / `show*` tools are colorized for people. Agents should prefer native
+Slurm fields or `solx --json`; free GPUs equal `Gres` minus `GresUsed`.
 
 ---
 
-## Sol's own `my*` / `show*` wrappers
-
-The `show*` wrappers are color-coded for **human eyes** and fight
-`awk`/`grep` - use them to *show a user*. As an **agent**, parse the
-right-hand form instead.
-
-| You want | Human wrapper | Parse this (agent) |
-|----------|---------------|--------------------|
-| Your fairshare / priority | `myfairshare` | `myfairshare` -> `RealFairShare` col |
-| Your `/scratch` quota | - | `beegfs-ctl --getquota --uid $USER` |
-| Your jobs right now | `myjobs` | `squeue --me -O JobID,State,Reason` |
-| Estimated start of a pending job | `thisjob <id>` | `scontrol show job <id>` -> `StartTime=` |
-| Efficiency of a finished job | - | `seff <jobid>` |
-| Free capacity / partitions | `showparts` | `sinfo -h -o "%P %a %l %D %t"` |
-| Free GPUs (= Gres − GresUsed) | `showgpus` | `sinfo -h -O "Partition,StateLong,Gres,GresUsed"` |
-
----
-
-## Reaching a compute-node service from your laptop
+## Remote services
 
 ```shell
-# VS Code: from a Sol login node, register a tunnel (wraps srun on lightwork)
-vscode                          # then open the tunnel named sol_$USER
+# On a Sol login node: register a VS Code tunnel on lightwork.
+vscode
 
-# Manual port-forward (e.g. Jupyter on $NODE:8888), run from your LAPTOP:
+# On your laptop: forward Jupyter on compute node $NODE, port 8888.
 ssh -N -L 8888:localhost:8888 -J $USER@login.sol.rc.asu.edu $USER@$NODE
 ```
 
-`$NODE` is the compute node your allocation landed on (`squeue --me` ->
-NODELIST). Bind services to `localhost`, never `0.0.0.0`, on shared nodes.
+Get `$NODE` from the `NODELIST` column in `squeue --me`. Bind services to
+`localhost`, never `0.0.0.0`, on shared nodes.
 
----
+## Storage and I/O
 
-## Storage & caches
-
-| Path | For | Lifetime |
-|------|-----|----------|
-| `/scratch/$USER` | datasets, model caches, run outputs | **purged after inactivity** - renew with `solx keep` |
-| `/home/$USER` | code, configs, `~/.local` installs | persistent, small quota |
-
-Point heavyweight caches at `/scratch`, not `/home`:
+| **Path** | **Use** | **Policy** |
+| --- | --- | --- |
+| `/scratch/$USER` | Datasets, caches, checkpoints, outputs. | Temporary, not backed up; inactive files are purged. |
+| `/home/$USER` | Code, config, and small user installs. | Persistent, backed up, small quota. |
 
 ```shell
 export HF_HOME=/scratch/$USER/.cache/huggingface
 export UV_CACHE_DIR=/scratch/$USER/.cache/uv
 ```
 
+Use the DTN (`ssh soldtn`) for bulk transfer and metadata-heavy I/O. Use a
+compute node or batch job for compute. Keep heavy work off login nodes.
+
 ---
 
-## Heavy I/O - where to run it
+## Safe defaults
 
-Login nodes are throttled. For a big metadata pass (e.g. touching
-hundreds of thousands of files) use the **DTN** (`ssh soldtn`), a
-**compute node** (`interactive`), or a short **`htc` batch job** - never
-the login node.
+| **Rule** | **Default** |
+| --- | --- |
+| Preview changes | Use `-n` / `--dry-run` before `job stop`, `keep`, or allocation changes. |
+| Parse output | Use `solx --json ...` or native Slurm fields; do not scrape colorized wrappers. |
+| Route short jobs | Use `htc` for work up to 4 h, including GPU jobs. |
+| Protect the login node | Move compute and metadata-heavy I/O to a compute node, batch job, or DTN. |
+| Preserve queue priority | Diagnose `PENDING`; update a viable route in place instead of resubmitting. |

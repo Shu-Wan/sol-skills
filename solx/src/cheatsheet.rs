@@ -23,12 +23,15 @@ mod tests {
     #[test]
     fn cheatsheet_has_the_key_sections() {
         for needle in [
-            "Know your access",
+            "## Access",
             "Partition",
             "QOS",
             "debug",
             "htc",
             "solx",
+            "collaborator-owned entries",
+            "dirs_touched",
+            "failure exits 1",
         ] {
             assert!(CHEATSHEET.contains(needle), "cheatsheet missing {needle:?}");
         }

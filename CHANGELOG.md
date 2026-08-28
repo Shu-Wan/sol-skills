@@ -11,7 +11,7 @@ version matches the `version` field in [`solx/Cargo.toml`](solx/Cargo.toml)
 and in [`skills/sol-skill/SKILL.md`](skills/sol-skill/SKILL.md), and the git
 tag, and a pushed `vX.Y.Z` tag builds and publishes the release.
 
-## [1.0.3] - 2026-08-21
+## [1.0.3] - 2026-08-28
 
 ### Fixed
 
@@ -40,6 +40,17 @@ tag, and a pushed `vX.Y.Z` tag builds and publishes the release.
   as a successful one.
 
 ### Changed
+
+- **The Sol cheatsheet is now a modern two-page reference using ASU's color
+  palette.** Its renderer prevents overlapping content, produces deterministic
+  output, and builds the PDF from the same Markdown embedded by
+  `solx cheatsheet`, keeping the PDF, CLI, and skill reference synchronized
+  (issue #49).
+- **The cheatsheet now covers the complete `solx` command surface and current
+  Sol routing guidance.** It adds job aliases and safety behavior, scratch
+  renewal counts, partition and QOS tables, pending-job diagnosis, status
+  commands, remote services, and storage and I/O defaults. The skill now uses
+  the current `-p htc -q debug` route for urgent tests up to 15 minutes.
 
 - **`solx keep` refreshes directory timestamps too**, the flagged directory
   itself included, and reports them in a new `dirs_touched` JSON field
