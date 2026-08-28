@@ -256,6 +256,12 @@ their timestamps with `touch`. It only ever touches directories that are
 **both** flagged by Sol **and** in your keep-list - so there's nothing for it
 to do until Sol actually flags something.
 
+Inside a kept directory it refreshes every file **and** every directory,
+including the flagged directory itself: touching a file doesn't move its
+parent's timestamp, so a directory's own stamp has to be set directly.
+Entries a collaborator owns are renewed too, as long as you can write them -
+the common case in a shared `/scratch` project tree.
+
 **The keep-list comes from the `[keep]` block** in your `solx` config
 (`include` / `exclude`). Patterns are gitignore-style: a bare path means
 that directory and everything under it, `!` carves a subtree out, `**`
@@ -354,3 +360,16 @@ Sol drops warning CSVs in `$HOME` as files age out
 
 So `solx keep` can't be used to keep arbitrary files alive on a cron - there's
 nothing to do until Sol drops a warning CSV.
+
+The touch itself is `utimensat(AT_FDCWD, path, NULL, 0)`, the same "both
+stamps to now" call plain `touch` makes. That form needs only **write
+permission** on the entry; a call that passes explicit timestamps needs
+**ownership** and fails with `Operation not permitted` on a labmate's file,
+even a world-writable one in your own tree.
+
+The `--json` summary counts what actually changed: `files_touched` and
+`dirs_touched` are entries that got fresh stamps (an entry deleted between
+the walk and the touch counts as neither), and `failures` counts failed
+operations - one per entry that couldn't be touched, plus one per directory
+that couldn't be walked. `dirs` is a different number: how many flagged
+directories the plan kept, not how many were touched. Any failure exits 1.
