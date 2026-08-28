@@ -24,6 +24,8 @@ the generated PDF into a compact operational cheatsheet.
 - [x] Update commands, aliases, JSON behavior, safety rules, and job routing.
 - [x] Add the `uv`/ReportLab renderer and build integration.
 - [x] Render and inspect every final PDF page.
+- [x] Remove the page-one overlay and align the visual system with ASU's
+  official primary palette.
 - [x] Pass Markdown lint, Ruff, PDF extraction checks, and all Rust tests.
 
 ## Decision Log
@@ -36,3 +38,11 @@ the generated PDF into a compact operational cheatsheet.
   panels, and compact decision tables to make scanning faster.
 - Derived the displayed version from `solx/Cargo.toml` and pinned renderer
   dependencies through a PEP 723 `uv` script for reproducible builds on Sol.
+- Replaced the escaping decorative circle with a contained command-cursor mark
+  after inspecting the generated PDF at 3x resolution.
+- Adopted ASU Maroon (`#8C1D40`), ASU Gold (`#FFC627`), Rich Black, White, and
+  ASU Gray as the core palette; maroon provides structure while gold is
+  reserved for decisions, cautions, and navigation rules.
+- Replaced numeric card labels with semantic wayfinding labels such as
+  `ACCESS`, `ROUTING`, `SAFETY`, and `STORAGE` because the cards are reference
+  categories, not ordered steps.

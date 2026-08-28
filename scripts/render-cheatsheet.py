@@ -45,27 +45,23 @@ COLUMN_WIDTH = (PAGE_WIDTH - 2 * MARGIN - GAP) / 2
 CONTENT_WIDTH = COLUMN_WIDTH - 12
 FIRST_HEADER = 0.92 * inch
 
-INK = colors.HexColor("#17332D")
-MUTED = colors.HexColor("#60736D")
-PAGE_BG = colors.HexColor("#F2F7F5")
+INK = colors.HexColor("#242424")
+MUTED = colors.HexColor("#747474")
+PAGE_BG = colors.HexColor("#F4F4F4")
 WHITE = colors.white
-GREEN = colors.HexColor("#0B5D4B")
-GREEN_DARK = colors.HexColor("#06483A")
-GREEN_PALE = colors.HexColor("#E8F4F0")
-GOLD = colors.HexColor("#F2B134")
-GOLD_DARK = colors.HexColor("#8A6100")
-GOLD_PALE = colors.HexColor("#FFF6DA")
-BLUE = colors.HexColor("#315C8C")
-BLUE_PALE = colors.HexColor("#EDF3FB")
-RULE = colors.HexColor("#BDD6CE")
-CODE_BG = colors.HexColor("#102A27")
-CODE_FG = colors.HexColor("#E9F8F3")
+BLACK = colors.HexColor("#000000")
+MAROON = colors.HexColor("#8C1D40")
+GOLD = colors.HexColor("#FFC627")
+GOLD_PALE = colors.HexColor("#FFF4CF")
+RULE = colors.HexColor("#D5D5D5")
+CODE_BG = colors.HexColor("#161616")
+CODE_FG = colors.HexColor("#F7F7F7")
 
-PALETTES = [
-    (GREEN, GREEN_PALE),
-    (BLUE, BLUE_PALE),
-    (GOLD_DARK, GOLD_PALE),
-]
+CARD_TONES = {
+    "maroon": (MAROON, WHITE),
+    "gold": (GOLD, BLACK),
+    "black": (BLACK, WHITE),
+}
 
 
 @dataclass
@@ -127,7 +123,7 @@ def inline_markup(token: Token) -> str:
             parts.append(" ")
         elif child.type == "code_inline":
             value = html.escape(child.content)
-            parts.append(f'<font name="SolMono" color="#0B5D4B">{value}</font>')
+            parts.append(f'<font name="SolMono" color="#8C1D40">{value}</font>')
         elif child.type == "strong_open":
             parts.append("<b>")
         elif child.type == "strong_close":
@@ -138,7 +134,7 @@ def inline_markup(token: Token) -> str:
             parts.append("</i>")
         elif child.type == "link_open":
             href = html.escape(child.attrGet("href") or "", quote=True)
-            parts.append(f'<link href="{href}" color="#0B6B57">')
+            parts.append(f'<link href="{href}" color="#8C1D40">')
         elif child.type == "link_close":
             parts.append("</link>")
         elif child.type == "html_inline":
@@ -228,13 +224,18 @@ SMALL_STYLE = ParagraphStyle(
     fontSize=6.05,
     leading=7.25,
 )
-CARD_TITLE_STYLE = ParagraphStyle(
+CARD_TITLE_LIGHT_STYLE = ParagraphStyle(
     "CardTitle",
     fontName="SolSansBold",
     fontSize=8.2,
     leading=9.2,
     textColor=WHITE,
     spaceAfter=0,
+)
+CARD_TITLE_DARK_STYLE = ParagraphStyle(
+    "CardTitleDark",
+    parent=CARD_TITLE_LIGHT_STYLE,
+    textColor=BLACK,
 )
 TABLE_CELL_STYLE = ParagraphStyle(
     "TableCell",
@@ -294,7 +295,7 @@ def data_table(rows: list[list[str]]) -> Table:
     ]
     table = Table(normalized, colWidths=table_widths(rows), repeatRows=1, hAlign="LEFT")
     style = [
-        ("BACKGROUND", (0, 0), (-1, 0), GREEN),
+        ("BACKGROUND", (0, 0), (-1, 0), MAROON),
         ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 3.5),
@@ -302,7 +303,7 @@ def data_table(rows: list[list[str]]) -> Table:
         ("TOPPADDING", (0, 0), (-1, -1), 2.5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
         ("GRID", (0, 0), (-1, -1), 0.35, RULE),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, colors.HexColor("#F0F7F4")]),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, colors.HexColor("#F4F4F4")]),
     ]
     table.setStyle(TableStyle(style))
     return table
@@ -359,9 +360,15 @@ def block_flowables(blocks: list[Block]) -> list[Flowable]:
     return flowables
 
 
-def card(label: str, title: str, blocks: list[Block], palette: int) -> Flowable:
-    accent, pale = PALETTES[palette % len(PALETTES)]
-    heading = Paragraph(f"{label}  /  {html.escape(title.upper())}", CARD_TITLE_STYLE)
+def card(category: str, title: str, blocks: list[Block], tone: str) -> Flowable:
+    accent, title_color = CARD_TONES[tone]
+    title_style = (
+        CARD_TITLE_DARK_STYLE if title_color == BLACK else CARD_TITLE_LIGHT_STYLE
+    )
+    heading = Paragraph(
+        f"{html.escape(category.upper())}  /  {html.escape(title.upper())}",
+        title_style,
+    )
     body = block_flowables(blocks)
     table = Table([[heading], [body]], colWidths=[COLUMN_WIDTH], hAlign="LEFT")
     table.setStyle(
@@ -370,7 +377,7 @@ def card(label: str, title: str, blocks: list[Block], palette: int) -> Flowable:
                 ("BACKGROUND", (0, 0), (-1, 0), accent),
                 ("BACKGROUND", (0, 1), (-1, -1), WHITE),
                 ("BOX", (0, 0), (-1, -1), 0.6, accent),
-                ("LINEBELOW", (0, 0), (-1, 0), 2.2, pale),
+                ("LINEBELOW", (0, 0), (-1, 0), 2.2, GOLD),
                 ("LEFTPADDING", (0, 0), (-1, 0), 7),
                 ("RIGHTPADDING", (0, 0), (-1, 0), 7),
                 ("TOPPADDING", (0, 0), (-1, 0), 5),
@@ -388,7 +395,20 @@ def card(label: str, title: str, blocks: list[Block], palette: int) -> Flowable:
 
 def make_story(sections: list[Section]) -> list[Flowable]:
     story: list[Flowable] = []
-    card_number = 1
+    section_design = {
+        "Know your access first": ("Access", "maroon"),
+        "Everyday solx workflow": ("Workflow", "maroon"),
+        "Complete solx command map": ("Commands", "maroon"),
+        "Output, targeting, and safety rules": ("Safety", "gold"),
+        "solx keep - bounded scratch renewal": ("Scratch", "maroon"),
+        "Slurm basics": ("Batch", "maroon"),
+        "solx and raw Slurm equivalents": ("Translate", "black"),
+        "Job stuck PENDING? Diagnose before rerouting": ("Diagnose", "gold"),
+        "Human wrappers and agent-parseable commands": ("Automation", "maroon"),
+        "Reach a compute-node service from your laptop": ("Connect", "black"),
+        "Storage and heavy I/O": ("Storage", "maroon"),
+        "Five rules to remember": ("Remember", "gold"),
+    }
     for section in sections:
         if section.title == "Pick a partition by wall-time, not by GPU use":
             paragraphs = [
@@ -397,16 +417,17 @@ def make_story(sections: list[Section]) -> list[Flowable]:
             tables = [block for block in section.blocks if block.kind == "table"]
             quotes = [block for block in section.blocks if block.kind == "quote"]
             if tables:
-                story.append(card("02A", "Partitions", paragraphs + tables[:1], 0))
+                story.append(
+                    card("Routing", "Partitions", paragraphs + tables[:1], "maroon")
+                )
             if len(tables) > 1:
-                story.append(card("02B", "QOS overlays", tables[1:2], 1))
+                story.append(card("Access", "QOS overlays", tables[1:2], "black"))
             if quotes:
-                story.append(card("02C", "Routing in one glance", quotes, 2))
-            card_number = 3
+                story.append(card("Decision", "Routing in one glance", quotes, "gold"))
             continue
-        label = f"{card_number:02d}"
-        story.append(card(label, section.title, section.blocks, card_number - 1))
-        card_number += 1
+        plain_title = plain_text(section.title)
+        category, tone = section_design[plain_title]
+        story.append(card(category, section.title, section.blocks, tone))
     return story
 
 
@@ -429,21 +450,19 @@ def draw_first_page(canvas, doc, intro: str, version: str) -> None:
     y = PAGE_HEIGHT - MARGIN - 0.67 * inch
     width = PAGE_WIDTH - 2 * MARGIN
     height = 0.64 * inch
-    canvas.setFillColor(GREEN_DARK)
+    canvas.setFillColor(MAROON)
     canvas.roundRect(x, y, width, height, 10, stroke=0, fill=1)
-    canvas.setFillColor(colors.HexColor("#0E725C"))
-    canvas.circle(
-        PAGE_WIDTH - 0.7 * inch, y - 0.08 * inch, 0.72 * inch, stroke=0, fill=1
-    )
+    canvas.setFillColor(GOLD)
+    canvas.rect(x, y, 5, height, stroke=0, fill=1)
     canvas.setFillColor(WHITE)
     canvas.setFont("SolSansBold", 24)
     canvas.drawString(x + 16, y + 22, "Sol Quick Reference")
     canvas.setFont("SolSans", 7.2)
-    canvas.setFillColor(colors.HexColor("#D9EEE7"))
+    canvas.setFillColor(colors.HexColor("#F1DDE4"))
     canvas.drawString(x + 17, y + 10, intro)
 
     pill_width = 0.68 * inch
-    canvas.setFillColor(colors.HexColor("#084236"))
+    canvas.setFillColor(GOLD)
     canvas.roundRect(
         PAGE_WIDTH - MARGIN - pill_width - 12,
         y + 21,
@@ -453,21 +472,15 @@ def draw_first_page(canvas, doc, intro: str, version: str) -> None:
         stroke=0,
         fill=1,
     )
-    canvas.setFillColor(GOLD)
+    canvas.setFillColor(BLACK)
     canvas.setFont("SolMono", 6.7)
     canvas.drawCentredString(
         PAGE_WIDTH - MARGIN - pill_width / 2 - 12, y + 26.2, f"v{version}"
     )
 
-    chip_x = PAGE_WIDTH - MARGIN - 2.26 * inch
-    for text in ["JOBS", "SCRATCH", "SERVICES"]:
-        canvas.setStrokeColor(colors.HexColor("#5AA08F"))
-        canvas.setFillColor(colors.HexColor("#0A5546"))
-        canvas.roundRect(chip_x, y + 5.5, 0.64 * inch, 12, 6, stroke=1, fill=1)
-        canvas.setFillColor(colors.HexColor("#D9EEE7"))
-        canvas.setFont("SolSansBold", 5.4)
-        canvas.drawCentredString(chip_x + 0.32 * inch, y + 9.2, text)
-        chip_x += 0.7 * inch
+    canvas.setFillColor(GOLD)
+    canvas.setFont("SolMono", 15)
+    canvas.drawRightString(PAGE_WIDTH - MARGIN - 14, y + 7, ">_")
 
     draw_footer(canvas, doc.page)
     canvas.restoreState()
@@ -477,7 +490,7 @@ def draw_later_page(canvas, doc, version: str) -> None:
     canvas.saveState()
     canvas.setFillColor(PAGE_BG)
     canvas.rect(0, 0, PAGE_WIDTH, PAGE_HEIGHT, stroke=0, fill=1)
-    canvas.setFillColor(GREEN)
+    canvas.setFillColor(MAROON)
     canvas.setFont("SolSansBold", 6.5)
     canvas.drawString(MARGIN, PAGE_HEIGHT - 0.24 * inch, "ASU SOL  /  QUICK REFERENCE")
     canvas.setFillColor(MUTED)
@@ -485,8 +498,8 @@ def draw_later_page(canvas, doc, version: str) -> None:
     canvas.drawRightString(
         PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 0.24 * inch, f"solx v{version}"
     )
-    canvas.setStrokeColor(RULE)
-    canvas.setLineWidth(0.5)
+    canvas.setStrokeColor(GOLD)
+    canvas.setLineWidth(1.2)
     canvas.line(
         MARGIN, PAGE_HEIGHT - 0.3 * inch, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 0.3 * inch
     )
