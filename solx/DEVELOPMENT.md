@@ -46,10 +46,19 @@ Notable design decisions:
   `keep.rs`; run them before touching matcher code.
 * **Enumeration.** `ignore::WalkBuilder` with every ignore facility off
   (`hidden(false)`, `ignore(false)`, `git_*(false)`, `parents(false)`,
-  `follow_links(false)`), files only - semantics equal `find DIR -type f`,
-  hidden files included.
-* **Touch.** `filetime::set_file_times` to now; a missing path is a silent
-  skip and nothing is ever created (`touch -c` semantics).
+  `follow_links(false)`) - semantics equal `find DIR -type f` plus `find DIR
+  -type d`, hidden entries included, symlinks neither touched nor followed.
+  Directories are in because touching a file does not move its parent's
+  mtime, so the flagged directory's own stamp would never be refreshed.
+* **Touch.** `utimensat(AT_FDCWD, path, NULL, 0)`, the "both stamps to now"
+  form, which per utimensat(2) needs only **write permission**. Explicit
+  stamps need **ownership** and EPERM on the collaborator-owned files a
+  shared project directory is full of (issue #47). A missing path is a
+  silent skip and nothing is ever created (`touch -c` semantics).
+* **Counting.** `files_touched` / `dirs_touched` count entries that got
+  fresh stamps; `failures` counts failed *operations*, one per entry that
+  could not be touched plus one per directory that could not be walked.
+  Per-entry, not per-shard: a `BATCH`-wide failure must not report as one.
 * **Completion scripts.** `assets/` holds the static bash/zsh/fish scripts,
   embedded via `include_str!`. Edit them as a set so the three shells stay
   in sync with the command surface; `tests/cli.rs` smoke-checks that each
