@@ -401,19 +401,24 @@ def card(
     return KeepTogether([table, Spacer(1, 6)])
 
 
+def require_section(sections: list[Section], title: str) -> Section:
+    """Return a required section or explain which Markdown heading is missing."""
+    for section in sections:
+        if section.title == title:
+            return section
+    raise RuntimeError(f'required cheatsheet section is missing: "{title}"')
+
+
 def make_story(sections: list[Section]) -> list[Flowable]:
     story: list[Flowable] = []
     # Keep the second page balanced: the compact rules card closes the left
     # column, while diagnosis starts the right-hand troubleshooting column.
-    remember = next(
-        section for section in sections if section.title == "Five rules to remember"
-    )
+    remember = require_section(sections, "Five rules to remember")
     sections = [section for section in sections if section is not remember]
-    diagnose_index = next(
-        index
-        for index, section in enumerate(sections)
-        if section.title == "Job stuck PENDING? Diagnose before rerouting"
+    diagnose = require_section(
+        sections, "Job stuck PENDING? Diagnose before rerouting"
     )
+    diagnose_index = sections.index(diagnose)
     sections.insert(diagnose_index, remember)
     section_design = {
         "Know your access first": ("Access", "maroon"),
@@ -446,7 +451,12 @@ def make_story(sections: list[Section]) -> list[Flowable]:
                 story.append(card("Decision", "Routing in one glance", quotes, "gold"))
             continue
         plain_title = plain_text(section.title)
-        category, tone = section_design[plain_title]
+        design = section_design.get(plain_title)
+        if design is None:
+            raise RuntimeError(
+                f'cheatsheet section has no card design: "{plain_title}"'
+            )
+        category, tone = design
         compact = plain_title == "solx keep - bounded scratch renewal"
         story.append(card(category, section.title, section.blocks, tone, compact))
     return story
@@ -550,7 +560,7 @@ def frames(first: bool) -> list[Frame]:
 
 def render(source: Path, output: Path, version: str) -> None:
     register_fonts()
-    intro, sections = parse_markdown(source.read_text())
+    intro, sections = parse_markdown(source.read_text(encoding="utf-8"))
     output.parent.mkdir(parents=True, exist_ok=True)
     doc = BaseDocTemplate(
         str(output),
