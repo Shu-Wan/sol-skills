@@ -28,8 +28,14 @@ sed -e '1d' \
     -e 's/↔/<->/g' -e 's/→/->/g' \
     "$SRC" > "$TMP"
 
-UV_CACHE_DIR="${UV_CACHE_DIR:-/scratch/$USER/.cache/uv}" \
-  uv run --script "$ROOT/scripts/render-cheatsheet.py" \
+if [[ -z "${UV_CACHE_DIR:-}" ]]; then
+  SCRATCH_ROOT="/scratch/$(id -un)"
+  if [[ -d "$SCRATCH_ROOT" ]]; then
+    export UV_CACHE_DIR="$SCRATCH_ROOT/.cache/uv"
+  fi
+fi
+
+uv run --script "$ROOT/scripts/render-cheatsheet.py" \
   "$TMP" "$OUT" --version "$SOLX_VERSION"
 
 echo "wrote $OUT ($(du -h "$OUT" | cut -f1), renderer: ReportLab)"

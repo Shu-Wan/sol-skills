@@ -405,7 +405,9 @@ def make_story(sections: list[Section]) -> list[Flowable]:
     story: list[Flowable] = []
     # Keep the second page balanced: the compact rules card closes the left
     # column, while diagnosis starts the right-hand troubleshooting column.
-    remember = next(section for section in sections if section.title == "Five rules to remember")
+    remember = next(
+        section for section in sections if section.title == "Five rules to remember"
+    )
     sections = [section for section in sections if section is not remember]
     diagnose_index = next(
         index
@@ -559,6 +561,7 @@ def render(source: Path, output: Path, version: str) -> None:
         bottomMargin=MARGIN,
         title="Sol Quick Reference",
         author="Shu-Wan / solx",
+        invariant=1,
     )
     first = PageTemplate(
         id="First",
