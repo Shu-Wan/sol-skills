@@ -346,11 +346,12 @@ def code_box(value: str) -> Table:
     return table
 
 
-def block_flowables(blocks: list[Block]) -> list[Flowable]:
+def block_flowables(blocks: list[Block], compact: bool = False) -> list[Flowable]:
     flowables: list[Flowable] = []
     for block in blocks:
         if block.kind == "paragraph":
-            flowables.append(Paragraph(str(block.value), BODY_STYLE))
+            style = SMALL_STYLE if compact else BODY_STYLE
+            flowables.append(Paragraph(str(block.value), style))
         elif block.kind == "quote":
             flowables.extend([quote_box(str(block.value)), Spacer(1, 3)])
         elif block.kind == "code":
@@ -360,7 +361,13 @@ def block_flowables(blocks: list[Block]) -> list[Flowable]:
     return flowables
 
 
-def card(category: str, title: str, blocks: list[Block], tone: str) -> Flowable:
+def card(
+    category: str,
+    title: str,
+    blocks: list[Block],
+    tone: str,
+    compact: bool = False,
+) -> Flowable:
     accent, title_color = CARD_TONES[tone]
     title_style = (
         CARD_TITLE_DARK_STYLE if title_color == BLACK else CARD_TITLE_LIGHT_STYLE
@@ -369,7 +376,8 @@ def card(category: str, title: str, blocks: list[Block], tone: str) -> Flowable:
         f"{html.escape(category.upper())}  /  {html.escape(title.upper())}",
         title_style,
     )
-    body = block_flowables(blocks)
+    body = block_flowables(blocks, compact=compact)
+    body_padding = 3.5 if compact else 5
     table = Table([[heading], [body]], colWidths=[COLUMN_WIDTH], hAlign="LEFT")
     table.setStyle(
         TableStyle(
@@ -384,8 +392,8 @@ def card(category: str, title: str, blocks: list[Block], tone: str) -> Flowable:
                 ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
                 ("LEFTPADDING", (0, 1), (-1, -1), 6),
                 ("RIGHTPADDING", (0, 1), (-1, -1), 6),
-                ("TOPPADDING", (0, 1), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 1), (-1, -1), 5),
+                ("TOPPADDING", (0, 1), (-1, -1), body_padding),
+                ("BOTTOMPADDING", (0, 1), (-1, -1), body_padding),
                 ("ROUNDEDCORNERS", [6, 6, 6, 6]),
             ]
         )
@@ -395,6 +403,16 @@ def card(category: str, title: str, blocks: list[Block], tone: str) -> Flowable:
 
 def make_story(sections: list[Section]) -> list[Flowable]:
     story: list[Flowable] = []
+    # Keep the second page balanced: the compact rules card closes the left
+    # column, while diagnosis starts the right-hand troubleshooting column.
+    remember = next(section for section in sections if section.title == "Five rules to remember")
+    sections = [section for section in sections if section is not remember]
+    diagnose_index = next(
+        index
+        for index, section in enumerate(sections)
+        if section.title == "Job stuck PENDING? Diagnose before rerouting"
+    )
+    sections.insert(diagnose_index, remember)
     section_design = {
         "Know your access first": ("Access", "maroon"),
         "Everyday solx workflow": ("Workflow", "maroon"),
@@ -427,7 +445,8 @@ def make_story(sections: list[Section]) -> list[Flowable]:
             continue
         plain_title = plain_text(section.title)
         category, tone = section_design[plain_title]
-        story.append(card(category, section.title, section.blocks, tone))
+        compact = plain_title == "solx keep - bounded scratch renewal"
+        story.append(card(category, section.title, section.blocks, tone, compact))
     return story
 
 

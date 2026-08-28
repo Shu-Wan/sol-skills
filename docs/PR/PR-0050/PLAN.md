@@ -5,7 +5,7 @@
 Issue [#49](https://github.com/Shu-Wan/solx/issues/49) requested a more
 polished `docs/cheatsheet.pdf`. The existing PDF read like a default typeset
 document, duplicated its title, wrapped commands poorly, and did not cover the
-complete `solx` v1.0.2 command and safety surface.
+complete `solx` v1.0.3 command and safety surface.
 
 This PR keeps the Markdown/CLI reference as the content source while turning
 the generated PDF into a compact operational cheatsheet.
@@ -46,3 +46,9 @@ the generated PDF into a compact operational cheatsheet.
 - Replaced numeric card labels with semantic wayfinding labels such as
   `ACCESS`, `ROUTING`, `SAFETY`, and `STORAGE` because the cards are reference
   categories, not ordered steps.
+- Merged the 1.0.3 changes from `main`; the generated banner now derives
+  `v1.0.3` from the crate metadata instead of carrying the branch's stale
+  1.0.2 value.
+- Updated the shared CLI/PDF cheatsheet source for 1.0.3: `keep` now documents
+  writable collaborator-owned entries, file and directory renewal,
+  `dirs_touched`, exact failure counts, and exit status 1 on any failure.

@@ -78,7 +78,7 @@ for `solx job jump`.
 | `solx job jump [JOBID]` | Attach with `srun --pty`; `-q` hides nesting/selection notes. |
 | `solx job time [JOBID]` | Print remaining time in `D-HH:MM:SS`. |
 | `solx job stop [JOBID]` | Cancel a job; `-n` previews and `-y` skips confirmation. |
-| `solx keep` | Renew flagged scratch files selected by `[keep]`; see below. |
+| `solx keep` | Renew flagged scratch files and directories selected by `[keep]`; see below. |
 | `solx config show` / `edit` | Inspect resolved config or open it in `$EDITOR`. |
 | `solx completions bash\|zsh\|fish` | Emit a static shell-completion script. |
 | `solx cheatsheet` | Print this quick reference as text. |
@@ -106,20 +106,21 @@ solx job stop 12345 -n                            # preview, never cancel
 
 ## `solx keep` - bounded scratch renewal
 
-`solx keep` touches only paths that are both in Sol's warning CSVs and matched
-by the config's `[keep]` include/exclude rules. It never walks all of
-`/scratch` blindly.
+Only warning-CSV paths matched by `[keep]` are walked. Writable files and
+directories, including flagged roots and collaborator-owned entries, are
+renewed; symlinks are skipped and `/scratch` is never scanned blindly.
 
 ```shell
 solx keep --dry-run -v       # inspect the full plan first
 solx keep                    # execute with a confirmation prompt
-solx keep --stage pending    # only the most urgent warning CSV
-solx --json keep -n          # machine-readable counts and a capped sample
+solx --json keep -n          # machine-readable plan and capped path sample
+solx --json keep -y          # execute; exact renewal and failure counts
 ```
 
-Other controls: `--stage all|inactive|over90|pending`, `--csv-dir DIR`, `-j N`
-workers, `-v`, `-n`, and `-y`. Run large renewals on the DTN (`ssh soldtn`), a
-compute node, or a short batch job - not on a throttled login node.
+Controls: `--stage all|inactive|over90|pending`, `--csv-dir DIR`, `-j N`, `-v`,
+`-n`, and `-y`. JSON reports `files_touched`, `dirs_touched`, and `failures`
+(`dirs` means matched roots); any failure exits 1. Run large renewals on the
+DTN, a compute node, or a short batch job - not on a throttled login node.
 
 ---
 
